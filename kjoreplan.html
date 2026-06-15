@@ -144,12 +144,15 @@
   <section id="tab-tildeling" class="tab">
     <div class="card">
       <h2>Tildeling av båter</h2>
-      <p class="muted">Forslaget fra slakteplanens «Boat» er forhåndsfylt – overstyr fritt. <b>trip_seq</b> grupperer turer (samme båt + slaktedato + trip_seq = én tur); <b>stop_seq</b> bestemmer rekkefølgen på stoppene. Rekkefølgen endres aldri automatisk.</p>
+      <p class="muted">Forslaget fra slakteplanens «Boat» er forhåndsfylt – overstyr fritt. <b>Alle felt er redigerbare</b>: kom OCR/importen skjevt ut, kan du rette lokalitet, antall, tonn og datoer her, legge til rader som mangler, eller slette feilrader. Gule rader trenger oppmerksomhet (ukjent lokalitet, mangler antall/tonn/dato). <b>trip</b> grupperer turer; <b>stop</b> bestemmer rekkefølgen på stoppene.</p>
       <div id="assign-empty" class="note info">Importer en slakteplan først (fane 1).</div>
-      <div style="margin:6px 0 10px"><button class="act" id="auto-assign">🚀 Lag forslag automatisk</button>
-        <span class="muted" style="margin-left:8px">Velger båter og bygger turer (én lokalitet per tur). Overstyr fritt i tabellen under.</span></div>
+      <div style="margin:6px 0 10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="act" id="auto-assign">🚀 Lag forslag automatisk</button>
+        <button class="sec" id="add-order">+ Legg til rad</button>
+        <span class="muted" style="align-self:center">Etter retting: trykk «Lag forslag automatisk» for å oppdatere båtvalg, eller åpne fane 4 for oppdatert plan.</span>
+      </div>
       <div class="scroll"><table id="t-assign"></table></div>
-      <button class="act" id="save-assign" style="margin-top:10px">Lagre tildeling</button>
+      <button class="act" id="save-assign" style="margin-top:10px">Lagre</button>
     </div>
   </section>
 
@@ -587,6 +590,11 @@ function parseOCRText(text){
     const unitm=line.match(/\b(0\d{3})\b/);
     let siteName="(ukjent)", code=null;
     if(sitem){siteName=sitem[1].trim(); code=sitem[2];}
+    else{ // ingen kode i parentes – ta lengste bokstavsekvens som navn
+      const words=line.match(/[A-Za-zÆØÅæøåÄÖäöÉé.\-\/]{3,}(?:\s+[A-Za-zÆØÅæøåÄÖäöÉé.\-\/]{2,})*/g)||[];
+      const cand=words.map(w=>w.trim()).filter(w=>!/^(j[øo]sn|sthp|euth|ja|nei|boat|process|pickup|site|unit|count|biomass|totals?)\b/i.test(w));
+      siteName=cand.sort((a,b)=>b.length-a.length)[0]||"(ukjent)";
+    }
     const count=toInt((countm[1]||"").replace(/[ ,.]/g,""));
     const avg=toFloat((avgm?avgm[1]:"").replace(/[ ,]/g,""));
     let bio=toFloat(biom?biom[1].replace(",", "."):0);
@@ -732,19 +740,47 @@ function renderAssign(){
   if(!state.orders.length){$("assign-empty").style.display="block";$("t-assign").innerHTML="";return;}
   $("assign-empty").style.display="none";
   const boats=state.config.boats.map(b=>b.name);
-  let h="<tr><th>ID</th><th>Slaktedato</th><th>Hentedato</th><th>Lokalitet</th><th>Merd</th><th>Antall</th><th>Tonn</th><th>Båt</th><th>trip_seq</th><th>stop_seq</th></tr>";
+  let h="<tr><th>ID</th><th>Slaktedato</th><th>Hentedato</th><th>Lokalitet</th><th>Merd</th><th>Antall</th><th>Tonn</th><th>Båt</th><th>trip</th><th>stop</th><th></th></tr>";
   state.orders.forEach(o=>{const a=state.assignments[o.id]||{boat:"",trip_seq:0,stop_seq:0};
     const opts=['<option value=""></option>'].concat(boats.map(b=>`<option ${a.boat===b?"selected":""}>${b}</option>`)).join("");
-    h+=`<tr><td>${o.id}</td><td>${o.process||""}</td><td>${o.pickup||""}</td><td>${o.site_name}</td><td>${o.unit}</td><td>${o.count}</td><td>${o.biomass_t.toFixed(1)}</td>
+    const needFix = !o.site_name || /ukjent/i.test(o.site_name) || !(o.count>0) || !(o.biomass_t>0) || !o.process;
+    h+=`<tr style="${needFix?'background:#fff8c5':''}">
+      <td style="font-size:11px;color:#6e7781">${o.id}</td>
+      <td><input style="width:96px" value="${o.process||""}" onchange="orderEd('${o.id}','process',this.value)"></td>
+      <td><input style="width:96px" value="${o.pickup||""}" onchange="orderEd('${o.id}','pickup',this.value)"></td>
+      <td><input style="width:150px" value="${(o.site_name||"").replace(/"/g,'&quot;')}" onchange="orderEd('${o.id}','site_name',this.value)"></td>
+      <td><input style="width:54px" value="${o.unit||""}" onchange="orderEd('${o.id}','unit',this.value)"></td>
+      <td><input type="number" style="width:80px" value="${o.count||0}" onchange="orderEd('${o.id}','count',this.value)"></td>
+      <td><input type="number" step="0.1" style="width:70px" value="${(o.biomass_t||0)}" onchange="orderEd('${o.id}','biomass_t',this.value)"></td>
       <td><select onchange="asnEd('${o.id}','boat',this.value)">${opts}</select></td>
-      <td><input type="number" style="width:60px" value="${a.trip_seq||0}" onchange="asnEd('${o.id}','trip_seq',this.value)"></td>
-      <td><input type="number" style="width:60px" value="${a.stop_seq||0}" onchange="asnEd('${o.id}','stop_seq',this.value)"></td></tr>`;
+      <td><input type="number" style="width:46px" value="${a.trip_seq||0}" onchange="asnEd('${o.id}','trip_seq',this.value)"></td>
+      <td><input type="number" style="width:46px" value="${a.stop_seq||0}" onchange="asnEd('${o.id}','stop_seq',this.value)"></td>
+      <td><button class="sec" onclick="delOrderRow('${o.id}')" title="Slett rad">🗑</button></td></tr>`;
   });
   $("t-assign").innerHTML=h;
 }
+window.orderEd=(id,f,v)=>{const o=state.orders.find(x=>x.id===id);if(!o)return;
+  if(f==="count") o.count=toInt(v);
+  else if(f==="biomass_t") o.biomass_t=toFloat(v);
+  else if(f==="process"||f==="pickup") o[f]=isoDate(v)||(v.trim()||null);
+  else if(f==="site_name"){const s=splitSite(v);o.site_name=v;o.site_code=s.code;o.site_key=siteKeyFromCode(s.name,s.code);}
+  else o[f]=v;
+  saveState();
+};
+window.delOrderRow=id=>{
+  state.orders=state.orders.filter(o=>o.id!==id);
+  delete state.assignments[id]; saveState(); renderAssign();
+};
+$("add-order").onclick=()=>{
+  const id="man"+Date.now();
+  const sameDate=(state.orders[0]&&state.orders[0].process)||"";
+  state.orders.push({id,process:sameDate,boat_proposed:null,euth:null,pickup:null,
+    site_name:"",site_code:null,site_key:"",unit:"",count:0,avg_weight:0,biomass_t:0,station:"Jøsnøya"});
+  state.assignments[id]={boat:"",trip_seq:0,stop_seq:0}; saveState(); renderAssign();
+};
 window.asnEd=(id,f,v)=>{const a=state.assignments[id]=state.assignments[id]||{boat:"",trip_seq:0,stop_seq:0};
   a[f]= (f==="boat")? v : toInt(v);};
-$("save-assign").onclick=()=>{saveState();alert("Tildeling lagret.");};
+$("save-assign").onclick=()=>{saveState();alert("Lagret. Åpne «Kjøreplan & konflikter» for å se oppdatert plan.");};
 function doAutoAssign(goPlan){
   if(!state.orders.length){alert("Importer en slakteplan først (fane 1).");return;}
   lastUnassigned=autoAssign();

@@ -19,7 +19,20 @@ Kravspesifikasjonen ligger i [`Prompt_kjoreplan_blobgebater.md`](Prompt_kjorepla
 | **pandas + openpyxl** | Robust Excel inn/ut – kjernen i arbeidsflyten din. |
 | **SQLite** | Lokal lagring av konfig, avstander, ledd og tildelinger. Ingen skytjenester. |
 
-## Installasjon og kjøring
+## To måter å kjøre på
+
+### A) Uten installasjon / uten admin (anbefalt på låst PC) — `kjoreplan.html`
+
+Dobbeltklikk **`kjoreplan.html`** så åpnes hele verktøyet i nettleseren du
+allerede har. Ingen Python, ingen installasjon, ingen admin-tilgang. Excel inn/ut
+går via SheetJS (lastes fra nett ved åpning – krever internett), og all logikk +
+lagring skjer lokalt i nettleseren (localStorage). Beregningsmotoren er en port av
+Python-versjonen og gir **identiske** tall (verifisert).
+
+> Trenger du en helt offline-versjon (uten internett), kan Excel-biblioteket
+> bygges inn i fila – si fra.
+
+### B) Python + Streamlit (for IT-styrt oppsett)
 
 ```bash
 pip install -r requirements.txt
@@ -28,6 +41,8 @@ streamlit run app.py
 ```
 
 Appen åpnes i nettleseren. Alt lagres lokalt i `kjoreplan.db`.
+
+Begge variantene har samme fem faner og samme beregningsmotor.
 
 ## Arbeidsflyt i appen (fanene)
 
@@ -68,6 +83,7 @@ vasket før neste tur / to steder samtidig, og ugjennomførbar hentedato.
 ## Prosjektstruktur
 
 ```
+kjoreplan.html              # selvstendig nettleser-app (null installasjon)
 app.py                      # Streamlit-UI
 kjoreplan/
   config.py                 # konfigurerbare standarder

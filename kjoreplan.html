@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kjøreplan bløggebåter – Jøsnøya</title>
+<!-- SheetJS for Excel inn/ut. Krever internett ved åpning (du har det). -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<style>
+  :root{--bg:#f6f8fa;--bd:#d0d7de;--fg:#1f2328;--accent:#0969da;--warn:#9a6700;--warnbg:#fff8c5;--err:#cf222e;--errbg:#ffebe9;--ok:#1a7f37;--okbg:#dafbe1;}
+  *{box-sizing:border-box}
+  body{font-family:Segoe UI,system-ui,sans-serif;margin:0;color:var(--fg);background:var(--bg);font-size:14px}
+  header{background:#0a3d62;color:#fff;padding:14px 20px}
+  header h1{margin:0;font-size:19px}
+  header p{margin:4px 0 0;font-size:12px;opacity:.85}
+  .tabs{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--bd);padding:0 12px;flex-wrap:wrap}
+  .tabs button{border:none;background:none;padding:12px 14px;cursor:pointer;font-size:14px;border-bottom:3px solid transparent;color:#57606a}
+  .tabs button.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  main{padding:18px 20px;max-width:1500px}
+  .tab{display:none}.tab.active{display:block}
+  .card{background:#fff;border:1px solid var(--bd);border-radius:8px;padding:16px;margin-bottom:16px}
+  .row{display:flex;gap:18px;flex-wrap:wrap}
+  .row>.card{flex:1;min-width:320px}
+  h2{font-size:16px;margin:0 0 12px}h3{font-size:13px;margin:14px 0 6px;color:#57606a;text-transform:uppercase;letter-spacing:.4px}
+  button.act{background:var(--accent);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+  button.act:hover{background:#0860ca}
+  button.sec{background:#fff;border:1px solid var(--bd);padding:7px 12px;border-radius:6px;cursor:pointer}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th,td{border:1px solid var(--bd);padding:5px 7px;text-align:left;vertical-align:top}
+  th{background:#f0f3f6;position:sticky;top:0}
+  td.grid-cell{white-space:pre-line;font-size:11.5px}
+  input,select{font:inherit;padding:4px 6px;border:1px solid var(--bd);border-radius:5px;background:#fff}
+  input[type=number]{width:90px}
+  label{display:block;font-size:12px;margin:8px 0 2px;color:#57606a}
+  .muted{color:#6e7781;font-size:12px}
+  .pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600}
+  .pill.err{background:var(--errbg);color:var(--err)}.pill.warn{background:var(--warnbg);color:var(--warn)}.pill.ok{background:var(--okbg);color:var(--ok)}
+  .note{padding:8px 12px;border-radius:6px;margin:8px 0;font-size:12.5px}
+  .note.warn{background:var(--warnbg);color:var(--warn)}.note.err{background:var(--errbg);color:var(--err)}.note.ok{background:var(--okbg);color:var(--ok)}.note.info{background:#ddf4ff;color:#0550ae}
+  .scroll{overflow:auto;max-height:60vh}
+  .gantt-row{display:flex;align-items:center;margin:3px 0}
+  .gantt-label{width:90px;font-weight:600;font-size:12px}
+  .gantt-track{position:relative;height:22px;flex:1;background:#eef1f4;border-radius:4px}
+  .gantt-bar{position:absolute;height:18px;top:2px;border-radius:3px;font-size:10px;color:#fff;white-space:nowrap;overflow:hidden;padding:0 4px;line-height:18px}
+  .b-load{background:#0969da}.b-port{background:#8250df}
+  .filehint{font-size:11.5px;color:#6e7781;margin-top:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🐟 Kjøreplan for bløggebåter – Jøsnøya</h1>
+  <p>Lokalt verktøy som kjører i nettleseren. Standarder merket «må verifiseres» er antakelser – bekreft tallene. Alt lagres lokalt i denne nettleseren.</p>
+</header>
+<div class="tabs">
+  <button data-tab="import" class="active">1) Import</button>
+  <button data-tab="konfig">2) Konfig</button>
+  <button data-tab="tildeling">3) Tildeling</button>
+  <button data-tab="plan">4) Kjøreplan & konflikter</button>
+  <button data-tab="eksport">5) Eksport</button>
+</div>
+<main>
+  <div id="libwarn"></div>
+
+  <!-- 1) IMPORT -->
+  <section id="tab-import" class="tab active">
+    <div class="row">
+      <div class="card">
+        <h2>Slakteplan (.xlsx)</h2>
+        <input type="file" id="f-plan" accept=".xlsx,.xls">
+        <div class="filehint">Kolonner: Id, Process, Boat, Euth., Pickup time, Site, Unit, Count, Avg. weight, Biomass, Packing station. Robust mot rekkefølge.</div>
+        <div id="plan-status" class="muted" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h2>Avstander lokalitet → slakteri (.xlsx)</h2>
+        <input type="file" id="f-dist" accept=".xlsx,.xls">
+        <div class="filehint">Smalt ark: Lokalitet | N.M. | Seilingstid. Eller bredt med kolonner per slakteri (Jøsnøya/Ulvan/Herøy).</div>
+        <h2 style="margin-top:14px">Seilingsledd mellom lokaliteter (valgfritt)</h2>
+        <input type="file" id="f-legs" accept=".xlsx,.xls">
+        <div class="filehint">Ark med kolonnene Fra | Til | N.M.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="card">
+        <h3>Lagrede avstander (lokalitet → slakteri)</h3>
+        <div class="scroll"><table id="t-dist"></table></div>
+      </div>
+      <div class="card">
+        <h3>Seilingsledd (manuell innlegging)</h3>
+        <div class="scroll"><table id="t-legs"></table></div>
+        <div style="margin-top:10px;display:flex;gap:6px;align-items:end;flex-wrap:wrap">
+          <div><label>Fra (lokalitet/kode)</label><input id="leg-from"></div>
+          <div><label>Til (lokalitet/kode)</label><input id="leg-to"></div>
+          <div><label>N.M.</label><input id="leg-nm" type="number" min="0" step="0.5"></div>
+          <button class="act" id="add-leg">Legg til / oppdater ledd</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2) KONFIG -->
+  <section id="tab-konfig" class="tab">
+    <div class="card">
+      <h2>Flåte</h2>
+      <p class="muted">Maks tonn (store 600 / små 220) og lasterate er «må verifiseres». Antall eller tonn – den grensen som slår inn først gjelder.</p>
+      <table id="t-boats"></table>
+      <button class="sec" id="add-boat" style="margin-top:8px">+ Legg til båt (f.eks. innleid 5.)</button>
+    </div>
+    <div class="row">
+      <div class="card">
+        <h2>Slakteri</h2>
+        <label>Navn</label><input id="c-station">
+        <label>Ankomst (HH:MM)</label><input id="c-arrival">
+        <label>Pakkerate (stk/t) – må verifiseres</label><input id="c-packrate" type="number" step="500">
+        <label>Vask (timer)</label><input id="c-wash" type="number" step="0.5">
+        <label><input id="c-single" type="checkbox"> Kun én båt losser om gangen (FIFO)</label>
+      </div>
+      <div class="card">
+        <h2>Plan / fart / holdetid</h2>
+        <label><input id="c-common" type="checkbox"> Bruk felles planleggingsfart</label>
+        <label>Planleggingsfart (knop) – må verifiseres</label><input id="c-planspeed" type="number" step="0.5">
+        <label>Buffer (t) – trekk lasting tidligere (0 = ingen)</label><input id="c-buffer" type="number" step="0.5">
+        <label>Maks holdetid (t) – 0 = ingen grense (ikke gjettet)</label><input id="c-maxhold" type="number" step="1">
+        <label>Kø-toleranse (t) før varsel</label><input id="c-queue" type="number" step="0.5">
+      </div>
+    </div>
+    <button class="act" id="save-cfg">Lagre konfigurasjon</button>
+    <span id="cfg-status" class="muted" style="margin-left:10px"></span>
+  </section>
+
+  <!-- 3) TILDELING -->
+  <section id="tab-tildeling" class="tab">
+    <div class="card">
+      <h2>Tildeling av båter</h2>
+      <p class="muted">Forslaget fra slakteplanens «Boat» er forhåndsfylt – overstyr fritt. <b>trip_seq</b> grupperer turer (samme båt + slaktedato + trip_seq = én tur); <b>stop_seq</b> bestemmer rekkefølgen på stoppene. Rekkefølgen endres aldri automatisk.</p>
+      <div id="assign-empty" class="note info">Importer en slakteplan først (fane 1).</div>
+      <div class="scroll"><table id="t-assign"></table></div>
+      <button class="act" id="save-assign" style="margin-top:10px">Lagre tildeling</button>
+    </div>
+  </section>
+
+  <!-- 4) KJØREPLAN -->
+  <section id="tab-plan" class="tab">
+    <div id="plan-empty" class="note info">Importer en slakteplan først (fane 1).</div>
+    <div class="card">
+      <h2>Rutenett (rader = dato, kolonner = båt)</h2>
+      <div class="scroll"><table id="t-grid"></table></div>
+    </div>
+    <div class="card">
+      <h2>Tidslinje / Gantt per båt</h2>
+      <div id="gantt"></div>
+    </div>
+    <div class="card">
+      <h2>Advarsler / konflikter</h2>
+      <div id="conf-summary"></div>
+      <div class="scroll"><table id="t-conf"></table></div>
+    </div>
+    <div class="card">
+      <h2>Detaljert tidsplan</h2>
+      <div class="scroll"><table id="t-detail"></table></div>
+    </div>
+  </section>
+
+  <!-- 5) EKSPORT -->
+  <section id="tab-eksport" class="tab">
+    <div class="card">
+      <h2>Eksport til Excel</h2>
+      <p class="muted">Arkene: Kjøreplan (rutenett), Detaljer (per stopp), Konflikter.</p>
+      <button class="act" id="export-xlsx">⬇️ Last ned kjøreplan (.xlsx)</button>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* =========================================================================
+   Kjøreplan-verktøy – ren JavaScript-port av beregningsmotoren.
+   Logikk speiler kjoreplan/engine.py: baklengs tid fra 06:15, kø, konflikter.
+   ========================================================================= */
+
+// ---------- standard-konfig (alt konfigurerbart; "må verifiseres") ----------
+function defaultConfig(){
+  return {
+    boats:[
+      {name:"Tauroa", type:"stor", cap_count:110000, cap_tonnes:600, load_rate:30000, speed:13, hired:false, active:true},
+      {name:"Tautiki",type:"stor", cap_count:110000, cap_tonnes:600, load_rate:30000, speed:13, hired:false, active:true},
+      {name:"Taupo",  type:"liten",cap_count:40000,  cap_tonnes:220, load_rate:8000,  speed:10, hired:false, active:true},
+      {name:"Taupiri",type:"liten",cap_count:40000,  cap_tonnes:220, load_rate:8000,  speed:10, hired:false, active:true},
+    ],
+    station:{name:"Jøsnøya", arrival:"06:15", pack_rate:7000, wash_hours:4, single_unload:true},
+    plan:{use_common_speed:true, plan_speed:10.5, buffer_hours:0, max_holding_hours:0, queue_tolerance_hours:2}
+  };
+}
+
+// ---------- state + localStorage ----------
+const LS="kjoreplan_v1";
+let state = loadState();
+function loadState(){
+  try{const s=JSON.parse(localStorage.getItem(LS));if(s) return Object.assign(blankState(),s);}catch(e){}
+  return blankState();
+}
+function blankState(){return {config:defaultConfig(), orders:[], distances:[], legs:[], assignments:{}};}
+function saveState(){localStorage.setItem(LS, JSON.stringify(state));}
+
+// ---------- hjelpere ----------
+const norm = s => (s==null?"":String(s)).trim().toLowerCase().replace(/\s+/g," ");
+function boatByName(n){return state.config.boats.find(b=>b.name.toLowerCase()===norm(n));}
+function siteKeyFromCode(name,code){return (code||name||"").trim();}
+function splitSite(raw){
+  const s=String(raw==null?"":raw).trim();
+  const m=s.match(/\(([^)]+)\)\s*$/);
+  return {name:s, code:m?m[1].trim():null};
+}
+function toFloat(v,def=0){
+  if(v==null||v==="") return def;
+  if(typeof v==="number") return v;
+  const x=parseFloat(String(v).replace(/\s/g,"").replace(",", "."));
+  return isNaN(x)?def:x;
+}
+function toInt(v,def=0){return Math.round(toFloat(v,def));}
+function isoDate(v){ // -> 'yyyy-mm-dd' or null
+  if(v==null||v==="") return null;
+  if(v instanceof Date && !isNaN(v)) return fmtISO(v);
+  // SheetJS w/ cellDates kan gi Date; ellers parse streng
+  const s=String(v).trim();
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m=s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/); // dd.mm.yyyy
+  if(m){let y=m[3].length===2?"20"+m[3]:m[3];return `${y}-${pad(m[2])}-${pad(m[1])}`;}
+  const d=new Date(s); return isNaN(d)?null:fmtISO(d);
+}
+const pad=n=>String(n).padStart(2,"0");
+function fmtISO(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;}
+const DAGER=["søn","man","tir","ons","tor","fre","lør"];
+function dateAt(iso,hhmm){const[Y,M,D]=iso.split("-").map(Number);const[h,m]=hhmm.split(":").map(Number);return new Date(Y,M-1,D,h,m,0,0);}
+function addH(d,h){return new Date(d.getTime()+h*3600000);}
+function diffH(a,b){return (a.getTime()-b.getTime())/3600000;}
+function fmtDT(d){return `${pad(d.getDate())}.${pad(d.getMonth()+1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;}
+function fmtT(d){return `${pad(d.getHours())}:${pad(d.getMinutes())}`;}
+
+// ---------- avstandsbok ----------
+function makeBook(){
+  const toStation={}, legs={};
+  state.distances.forEach(d=>{toStation[norm(d.site_key)]=d;});
+  state.legs.forEach(l=>{legs[norm(l.from_key)+"|"+norm(l.to_key)]=l.nm; legs[norm(l.to_key)+"|"+norm(l.from_key)]=l.nm;});
+  return {
+    nmToStation:k=>{const d=toStation[norm(k)];return d?d.nm:null;},
+    directTime:k=>{const d=toStation[norm(k)];return (d&&d.sailing_time_h)?d.sailing_time_h:null;},
+    nmBetween:(a,b)=>{if(norm(a)===norm(b))return 0;const v=legs[norm(a)+"|"+norm(b)];return v==null?null:v;}
+  };
+}
+function sailingH(nm,boatName){
+  const p=state.config.plan;
+  let speed=p.use_common_speed?p.plan_speed:(boatByName(boatName)?.speed||p.plan_speed);
+  return speed>0?nm/speed:0;
+}
+function loadH(count,boatName){const b=boatByName(boatName);return (b&&b.load_rate>0)?count/b.load_rate:0;}
+function unloadH(count){const r=state.config.station.pack_rate;return r>0?count/r:0;}
+
+// ---------- bygg turer fra ordrer + tildelinger ----------
+function buildTrips(){
+  const byId={}; state.orders.forEach(o=>byId[o.id]=o);
+  const groups={};
+  for(const oid in state.assignments){
+    const a=state.assignments[oid], o=byId[oid]; if(!o) continue;
+    const boat=(a.boat||"").trim(); if(!boat) continue;
+    const key=boat+"||"+o.process+"||"+(a.trip_seq||0);
+    (groups[key]=groups[key]||[]).push({o,a});
+  }
+  const trips=[];
+  Object.keys(groups).sort().forEach(key=>{
+    const items=groups[key]; const boat=items[0].o.boat_assigned||items[0].a.boat;
+    const pdate=items[0].o.process;
+    const stops={}, order={};
+    items.forEach(({o,a})=>{
+      const sk=o.site_key;
+      if(!stops[sk]){stops[sk]={site_key:sk,site_name:o.site_name,order_ids:[],count:0,biomass_t:0};order[sk]=a.stop_seq||0;}
+      stops[sk].order_ids.push(o.id); stops[sk].count+=o.count; stops[sk].biomass_t+=o.biomass_t;
+      order[sk]=Math.min(order[sk],a.stop_seq||0);
+    });
+    const ordered=Object.keys(stops).sort((x,y)=> (order[x]-order[y])||(x<y?-1:1)).map(k=>stops[k]);
+    trips.push({boat:(items[0].a.boat||"").trim(), process:pdate, stops:ordered, trip_seq:items[0].a.trip_seq||0});
+  });
+  return trips;
+}
+
+// ---------- baklengs tidsberegning ----------
+function computeTrip(trip){
+  const cfg=state.config, book=makeBook();
+  const warnings=[];
+  const delivery=dateAt(trip.process, cfg.station.arrival);
+  const sched={trip, boat:trip.boat, delivery, station_departure_clean:delivery, stops:[], warnings};
+  if(!trip.stops.length){warnings.push("Turen har ingen stopp.");return sched;}
+  const buffer=Math.max(0,cfg.plan.buffer_hours);
+  let nextArrival=delivery; const n=trip.stops.length; const acc=[];
+  for(let i=n-1;i>=0;i--){
+    const stop=trip.stops[i]; let sailH=0, legMissing=false;
+    if(i===n-1){
+      const direct=book.directTime(stop.site_key), nm=book.nmToStation(stop.site_key);
+      if(direct!=null){sailH=direct;}
+      else if(nm!=null){sailH=sailingH(nm,trip.boat);}
+      else{legMissing=true; warnings.push(`Mangler avstand for lokalitet «${stop.site_name}» → ${cfg.station.name}. Seilingsledd satt til 0 t (ikke gjettet).`);}
+    }else{
+      const ns=trip.stops[i+1]; const nm=book.nmBetween(stop.site_key,ns.site_key);
+      if(nm==null){legMissing=true; warnings.push(`Mangler seilingsledd «${stop.site_name}» → «${ns.site_name}». Satt til 0 t (ikke gjettet) – legg inn avstanden manuelt.`);}
+      else{sailH=sailingH(nm,trip.boat);}
+    }
+    const departure=addH(nextArrival,-sailH);
+    const loadFinish=addH(departure,-buffer);
+    const lt=loadH(stop.count,trip.boat);
+    const loadStart=addH(loadFinish,-lt);
+    acc.push({site_key:stop.site_key,site_name:stop.site_name,arrival:loadStart,load_start:loadStart,
+              load_finish:loadFinish,departure,sailing_to_next_h:sailH,leg_missing:legMissing,
+              count:stop.count,biomass_t:stop.biomass_t,holding_h:0});
+    nextArrival=loadStart;
+  }
+  acc.reverse(); sched.stops=acc;
+  const first=acc[0]; const d0=book.directTime(first.site_key), nm0=book.nmToStation(first.site_key);
+  let back= d0!=null?d0:(nm0!=null?sailingH(nm0,trip.boat):0);
+  sched.station_departure_clean=addH(first.arrival,-back);
+  acc.forEach(s=>{s.holding_h=diffH(delivery,s.load_finish);});
+  return sched;
+}
+
+// ---------- kø på losseplassen (FIFO per dag) ----------
+function applyQueue(scheds){
+  const cfg=state.config;
+  function setU(s,start){const uh=unloadH(s.trip.stops.reduce((a,b)=>a+b.count,0));s.unload_start=start;s.unload_end=addH(start,uh);s.wash_end=addH(s.unload_end,cfg.station.wash_hours);}
+  if(!cfg.station.single_unload){scheds.forEach(s=>setU(s,s.delivery));return;}
+  const ordered=[...scheds].sort((a,b)=> (a.delivery-b.delivery)||(a.boat<b.boat?-1:1));
+  let busy=null,lastDay=null;
+  ordered.forEach(s=>{
+    const day=fmtISO(s.delivery); if(day!==lastDay){busy=null;lastDay=day;}
+    let start=s.delivery; if(busy&&busy>start) start=busy;
+    setU(s,start); busy=s.unload_end;
+    const wait=diffH(start,s.delivery);
+    if(wait>cfg.plan.queue_tolerance_hours) s.warnings.push(`Kø på losseplassen: lossing starter ${fmtT(start)} (${wait.toFixed(1)} t etter ${cfg.station.arrival}-vinduet).`);
+  });
+}
+
+// ---------- konfliktsjekk ----------
+function checkConflicts(scheds){
+  const cfg=state.config, out=[];
+  const push=(kind,sev,boat,date,msg)=>out.push({kind,severity:sev,boat,date,message:msg});
+  // hentedato per lokalitet (tidligste)
+  const pickup={};
+  state.orders.forEach(o=>{if(o.pickup){const cur=pickup[o.site_key];if(!cur||o.pickup<cur)pickup[o.site_key]=o.pickup;}});
+  scheds.forEach(s=>{
+    const boat=s.boat, pd=s.trip.process, b=boatByName(boat);
+    const totalT=s.trip.stops.reduce((a,x)=>a+x.biomass_t,0), totalC=s.trip.stops.reduce((a,x)=>a+x.count,0);
+    if(b){
+      if(totalT>b.cap_tonnes+1e-9) push("kapasitet_tonn","feil",boat,pd,`Last ${totalT.toFixed(1)} t over kapasitet (${b.cap_tonnes} t) for ${boat}.`);
+      if(totalC>b.cap_count) push("kapasitet_antall","feil",boat,pd,`Last ${totalC} stk over kapasitet (${b.cap_count} stk) for ${boat}.`);
+    }else push("ukjent_baat","advarsel",boat,pd,`Båt «${boat}» finnes ikke i flåtekonfigurasjonen.`);
+    if([0,6].includes(s.delivery.getDay())) push("helg_levering","feil",boat,pd,`Levering ${DAGER[s.delivery.getDay()]} ${fmtDT(s.delivery)} er i helg – ingen ankomst lør/søn.`);
+    s.stops.forEach(st=>{if(st.leg_missing)push("mangler_avstand","advarsel",boat,pd,`Stopp «${st.site_name}» mangler registrert seilingsavstand.`);});
+    const mh=cfg.plan.max_holding_hours;
+    if(mh&&mh>0){const worst=s.stops.reduce((a,x)=>!a||x.holding_h>a.holding_h?x:a,null);if(worst&&worst.holding_h>mh+1e-9)push("holdetid","advarsel",boat,pd,`Holdetid ${worst.holding_h.toFixed(1)} t (stopp «${worst.site_name}») over maks ${mh} t.`);}
+    s.warnings.filter(w=>w.startsWith("Kø på losseplassen")).forEach(w=>push("ko_losseplass","advarsel",boat,pd,w));
+    // hentedato gjennomførbar?
+    s.stops.forEach(st=>{const pu=pickup[st.site_key];if(pu&&fmtISO(st.load_start)<pu)push("hentedato","advarsel",boat,pd,`Stopp «${st.site_name}»: lasting må starte ${fmtDT(st.load_start)}, FØR foreslått hentedato ${pu}. Hentingen må starte tidligere.`);});
+  });
+  // båt to steder samtidig / ikke vasket før neste tur
+  const byBoat={}; scheds.forEach(s=>{(byBoat[s.boat]=byBoat[s.boat]||[]).push(s);});
+  Object.keys(byBoat).forEach(boat=>{
+    const lst=byBoat[boat].sort((a,b)=>a.station_departure_clean-b.station_departure_clean);
+    for(let i=0;i<lst.length-1;i++){const a=lst[i],b2=lst[i+1];const aEnd=a.wash_end||a.unload_end||a.delivery;
+      if(aEnd> addH(b2.station_departure_clean,1/3600)) push("overlapp","feil",boat,b2.trip.process,`${boat}: forrige tur ikke ferdig (klar/vasket ${fmtDT(aEnd)}) før neste tur starter (${fmtDT(b2.station_departure_clean)}).`);}
+  });
+  return out;
+}
+
+// ---------- hovedberegning ----------
+function computeAll(){
+  const trips=buildTrips();
+  const scheds=trips.map(computeTrip);
+  applyQueue(scheds);
+  const conflicts=checkConflicts(scheds);
+  return {scheds,conflicts};
+}
+
+/* ====================== IMPORT (SheetJS) ====================== */
+const SLA_AL={id:["id","slakteordre","order id","ordre"],process:["process","process date","slaktedato","slakt"],
+  boat:["boat","båt","baat"],euth:["euth.","euth","bløgget","blogget","avlivet"],
+  pickup:["pickup time","pickup","hentedato","hentetid","pick up time"],site:["site","lokalitet","location"],
+  unit:["unit","merd","enhet"],count:["count","antall","antall fisk","fish count"],
+  avg_weight:["avg. weight","avg weight","snittvekt","average weight","avg.weight"],
+  biomass:["biomass","biomasse"],station:["packing station","slakteri","packing","station"]};
+function colmap(headers,aliases){
+  const nm={}; headers.forEach(h=>nm[norm(h)]=h); const out={};
+  for(const f in aliases){let found=null;
+    for(const a of aliases[f]) if(nm[a]){found=nm[a];break;}
+    if(!found) for(const k in nm) if(aliases[f].some(a=>k.startsWith(a)||k.includes(a))){found=nm[k];break;}
+    if(found) out[f]=found;}
+  return out;
+}
+function readSheet(file){
+  return file.arrayBuffer().then(buf=>{
+    const wb=XLSX.read(buf,{type:"array",cellDates:true});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws,{defval:null,raw:true});
+  });
+}
+function importPlan(rows){
+  if(!rows.length) return {orders:[],warn:["Fant ingen rader."]};
+  const cm=colmap(Object.keys(rows[0]),SLA_AL); const warn=[];
+  ["id","process","site","count"].forEach(r=>{if(!cm[r])warn.push("Mangler nødvendig kolonne: "+r);});
+  const orders=[];
+  rows.forEach((row,idx)=>{
+    const g=f=>cm[f]!=null?row[cm[f]]:null;
+    if(g("site")==null) return;
+    const {name,code}=splitSite(g("site"));
+    const count=toInt(g("count")), avg=toFloat(g("avg_weight")); let bio=toFloat(g("biomass"));
+    if(bio<=0&&count>0&&avg>0) bio=count*avg/1e6;
+    const id=g("id")!=null?String(g("id")).trim():("rad"+idx);
+    orders.push({id, process:isoDate(g("process")), boat_assigned:null,
+      boat_proposed:g("boat")!=null?String(g("boat")).trim():null,
+      euth:g("euth")!=null?String(g("euth")).trim():null, pickup:isoDate(g("pickup")),
+      site_name:name, site_code:code, site_key:siteKeyFromCode(name,code),
+      unit:g("unit")!=null?String(g("unit")).trim():"", count, avg_weight:avg, biomass_t:bio,
+      station:g("station")!=null?String(g("station")).trim():"Jøsnøya"});
+  });
+  if(!orders.length) warn.push("Fant ingen gyldige rader i slakteplanen.");
+  return {orders,warn};
+}
+function importDistances(rows){
+  if(!rows.length) return {dist:[],warn:["Tomt ark."]};
+  const nm={}; Object.keys(rows[0]).forEach(h=>nm[norm(h)]=h);
+  const siteCol=["lokalitet","site","location"].map(a=>nm[a]).find(Boolean);
+  if(!siteCol) return {dist:[],warn:["Fant ikke lokalitet-kolonne."]};
+  const stationKeys=["jøsnøya","josnoya","jösnöya","ulvan","herøy","heroy"];
+  const stCols=Object.keys(nm).filter(k=>stationKeys.includes(k));
+  const out=[];
+  if(stCols.length){
+    rows.forEach(r=>{const {name,code}=splitSite(r[siteCol]);const key=(code||name).trim();
+      stCols.forEach(k=>{const v=toFloat(r[nm[k]],-1);if(v>=0)out.push({site_key:key,station:nm[k],nm:v,sailing_time_h:null});});});
+  }else{
+    const nmCol=["n.m.","nm","nautiske mil","nautical miles","distance"].map(a=>nm[a]).find(Boolean);
+    const tCol=["seilingstid","sailing time","tid"].map(a=>nm[a]).find(Boolean);
+    if(!nmCol&&!tCol) return {dist:[],warn:["Fant verken N.M.- eller seilingstid-kolonne."]};
+    rows.forEach(r=>{const {name,code}=splitSite(r[siteCol]);const key=(code||name).trim();
+      const v=nmCol?toFloat(r[nmCol]):0; const t=tCol?toFloat(r[tCol]):0;
+      out.push({site_key:key,station:"Jøsnøya",nm:v,sailing_time_h:(t&&t>0)?t:null});});
+  }
+  return {dist:out,warn:out.length?[]:["Fant ingen avstandsrader."]};
+}
+function importLegs(rows){
+  if(!rows.length) return {legs:[],warn:["Tomt ark."]};
+  const nm={}; Object.keys(rows[0]).forEach(h=>nm[norm(h)]=h);
+  const fc=["fra","from","fra lokalitet","from site"].map(a=>nm[a]).find(Boolean);
+  const tc=["til","to","til lokalitet","to site"].map(a=>nm[a]).find(Boolean);
+  const nc=["n.m.","nm","nautiske mil","distance"].map(a=>nm[a]).find(Boolean);
+  if(!(fc&&tc&&nc)) return {legs:[],warn:["Seilingsledd-ark må ha kolonnene Fra | Til | N.M."]};
+  const out=[];
+  rows.forEach(r=>{const f=splitSite(r[fc]),t=splitSite(r[tc]);const fk=(f.code||r[fc]+"").trim(),tk=(t.code||r[tc]+"").trim();
+    const v=toFloat(r[nc],-1);if(v>=0&&fk&&tk)out.push({from_key:fk,to_key:tk,nm:v});});
+  return {legs:out,warn:[]};
+}
+
+/* ====================== UI ====================== */
+function $(id){return document.getElementById(id);}
+document.querySelectorAll(".tabs button").forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  btn.classList.add("active"); $("tab-"+btn.dataset.tab).classList.add("active");
+  if(btn.dataset.tab==="tildeling") renderAssign();
+  if(btn.dataset.tab==="plan") renderPlan();
+});
+
+// lib-sjekk
+window.addEventListener("load",()=>{
+  if(typeof XLSX==="undefined"){
+    $("libwarn").innerHTML='<div class="note err">⚠ Excel-biblioteket (SheetJS) ble ikke lastet – sjekk at maskinen har internett, eller be om en helt-offline-versjon. Du kan fortsatt se/redigere lagrede data, men import/eksport av .xlsx virker ikke.</div>';
+  }
+});
+
+// ---- import-handlere ----
+$("f-plan").onchange=e=>{const f=e.target.files[0];if(!f)return;readSheet(f).then(rows=>{
+  const {orders,warn}=importPlan(rows);
+  state.orders=orders;
+  // bygg default-tildelinger, behold lagrede der de finnes
+  const saved=state.assignments||{}; const asn={};
+  orders.forEach(o=>{asn[o.id]=saved[o.id]||{boat:o.boat_proposed||"",trip_seq:0,stop_seq:0};});
+  state.assignments=asn; saveState();
+  $("plan-status").innerHTML=`Leste <b>${orders.length}</b> ordrer.`+(warn.length?` <span class="pill warn">${warn.length} merknad</span>`:"");
+  warn.forEach(w=>$("plan-status").innerHTML+=`<div class="note warn">${w}</div>`);
+}).catch(err=>$("plan-status").innerHTML=`<div class="note err">Feil ved lesing: ${err}</div>`);};
+
+$("f-dist").onchange=e=>{const f=e.target.files[0];if(!f)return;readSheet(f).then(rows=>{
+  const {dist,warn}=importDistances(rows); state.distances=dist; saveState(); renderDist();
+  alert(`Lagret ${dist.length} avstander.`+(warn.length?"\n"+warn.join("\n"):""));
+});};
+$("f-legs").onchange=e=>{const f=e.target.files[0];if(!f)return;readSheet(f).then(rows=>{
+  const {legs,warn}=importLegs(rows); state.legs=legs; saveState(); renderLegs();
+  alert(`Lagret ${legs.length} ledd.`+(warn.length?"\n"+warn.join("\n"):""));
+});};
+
+$("add-leg").onclick=()=>{
+  const f=$("leg-from").value.trim(),t=$("leg-to").value.trim(),nm=toFloat($("leg-nm").value,-1);
+  if(!f||!t||nm<0){alert("Fyll inn Fra, Til og N.M.");return;}
+  state.legs=state.legs.filter(l=>!(norm(l.from_key)===norm(f)&&norm(l.to_key)===norm(t)));
+  state.legs.push({from_key:f,to_key:t,nm}); saveState(); renderLegs();
+  $("leg-from").value=$("leg-to").value=$("leg-nm").value="";
+};
+
+function renderDist(){
+  const t=$("t-dist"); if(!state.distances.length){t.innerHTML="<tr><td class='muted'>Ingen avstander lagret ennå.</td></tr>";return;}
+  let h="<tr><th>Lokalitet</th><th>Slakteri</th><th>N.M.</th><th>Seilingstid (t)</th></tr>";
+  state.distances.forEach(d=>h+=`<tr><td>${d.site_key}</td><td>${d.station}</td><td>${d.nm}</td><td>${d.sailing_time_h??""}</td></tr>`);
+  t.innerHTML=h;
+}
+function renderLegs(){
+  const t=$("t-legs"); let h="<tr><th>Fra</th><th>Til</th><th>N.M.</th><th></th></tr>";
+  state.legs.forEach((l,i)=>h+=`<tr><td>${l.from_key}</td><td>${l.to_key}</td><td>${l.nm}</td><td><button class="sec" onclick="delLeg(${i})">slett</button></td></tr>`);
+  t.innerHTML=h;
+}
+window.delLeg=i=>{state.legs.splice(i,1);saveState();renderLegs();};
+
+// ---- konfig ----
+function renderConfig(){
+  const c=state.config;
+  let h="<tr><th>Båt</th><th>Type</th><th>Kap. antall</th><th>Maks tonn</th><th>Lasterate (stk/t)</th><th>Marsjfart (kn)</th><th>Innleid</th><th>Aktiv</th><th></th></tr>";
+  c.boats.forEach((b,i)=>h+=`<tr>
+    <td><input value="${b.name}" onchange="boatEd(${i},'name',this.value)"></td>
+    <td><input value="${b.type}" style="width:70px" onchange="boatEd(${i},'type',this.value)"></td>
+    <td><input type="number" value="${b.cap_count}" onchange="boatEd(${i},'cap_count',this.value)"></td>
+    <td><input type="number" value="${b.cap_tonnes}" onchange="boatEd(${i},'cap_tonnes',this.value)"></td>
+    <td><input type="number" value="${b.load_rate}" onchange="boatEd(${i},'load_rate',this.value)"></td>
+    <td><input type="number" value="${b.speed}" onchange="boatEd(${i},'speed',this.value)"></td>
+    <td><input type="checkbox" ${b.hired?"checked":""} onchange="boatEd(${i},'hired',this.checked)"></td>
+    <td><input type="checkbox" ${b.active?"checked":""} onchange="boatEd(${i},'active',this.checked)"></td>
+    <td><button class="sec" onclick="delBoat(${i})">slett</button></td></tr>`);
+  $("t-boats").innerHTML=h;
+  $("c-station").value=c.station.name; $("c-arrival").value=c.station.arrival;
+  $("c-packrate").value=c.station.pack_rate; $("c-wash").value=c.station.wash_hours;
+  $("c-single").checked=c.station.single_unload;
+  $("c-common").checked=c.plan.use_common_speed; $("c-planspeed").value=c.plan.plan_speed;
+  $("c-buffer").value=c.plan.buffer_hours; $("c-maxhold").value=c.plan.max_holding_hours;
+  $("c-queue").value=c.plan.queue_tolerance_hours;
+}
+window.boatEd=(i,f,v)=>{const b=state.config.boats[i];
+  if(["cap_count","cap_tonnes","load_rate","speed"].includes(f))v=toFloat(v);
+  b[f]=v;};
+window.delBoat=i=>{state.config.boats.splice(i,1);renderConfig();};
+$("add-boat").onclick=()=>{state.config.boats.push({name:"Ny båt",type:"liten",cap_count:40000,cap_tonnes:220,load_rate:8000,speed:10,hired:true,active:true});renderConfig();};
+$("save-cfg").onclick=()=>{const c=state.config;
+  c.station.name=$("c-station").value; c.station.arrival=$("c-arrival").value;
+  c.station.pack_rate=toFloat($("c-packrate").value); c.station.wash_hours=toFloat($("c-wash").value);
+  c.station.single_unload=$("c-single").checked;
+  c.plan.use_common_speed=$("c-common").checked; c.plan.plan_speed=toFloat($("c-planspeed").value);
+  c.plan.buffer_hours=toFloat($("c-buffer").value); c.plan.max_holding_hours=toFloat($("c-maxhold").value);
+  c.plan.queue_tolerance_hours=toFloat($("c-queue").value);
+  saveState(); $("cfg-status").textContent="Lagret ✓"; setTimeout(()=>$("cfg-status").textContent="",2000);
+};
+
+// ---- tildeling ----
+function renderAssign(){
+  if(!state.orders.length){$("assign-empty").style.display="block";$("t-assign").innerHTML="";return;}
+  $("assign-empty").style.display="none";
+  const boats=state.config.boats.map(b=>b.name);
+  let h="<tr><th>ID</th><th>Slaktedato</th><th>Hentedato</th><th>Lokalitet</th><th>Merd</th><th>Antall</th><th>Tonn</th><th>Båt</th><th>trip_seq</th><th>stop_seq</th></tr>";
+  state.orders.forEach(o=>{const a=state.assignments[o.id]||{boat:"",trip_seq:0,stop_seq:0};
+    const opts=['<option value=""></option>'].concat(boats.map(b=>`<option ${a.boat===b?"selected":""}>${b}</option>`)).join("");
+    h+=`<tr><td>${o.id}</td><td>${o.process||""}</td><td>${o.pickup||""}</td><td>${o.site_name}</td><td>${o.unit}</td><td>${o.count}</td><td>${o.biomass_t.toFixed(1)}</td>
+      <td><select onchange="asnEd('${o.id}','boat',this.value)">${opts}</select></td>
+      <td><input type="number" style="width:60px" value="${a.trip_seq||0}" onchange="asnEd('${o.id}','trip_seq',this.value)"></td>
+      <td><input type="number" style="width:60px" value="${a.stop_seq||0}" onchange="asnEd('${o.id}','stop_seq',this.value)"></td></tr>`;
+  });
+  $("t-assign").innerHTML=h;
+}
+window.asnEd=(id,f,v)=>{const a=state.assignments[id]=state.assignments[id]||{boat:"",trip_seq:0,stop_seq:0};
+  a[f]= (f==="boat")? v : toInt(v);};
+$("save-assign").onclick=()=>{saveState();alert("Tildeling lagret.");};
+
+// ---- kjøreplan ----
+function renderPlan(){
+  if(!state.orders.length){$("plan-empty").style.display="block";return;}
+  $("plan-empty").style.display="none";
+  const {scheds,conflicts}=computeAll();
+  renderGrid(scheds); renderGantt(scheds); renderConf(conflicts); renderDetail(scheds);
+}
+function renderGrid(scheds){
+  const boats=state.config.boats.filter(b=>b.active).map(b=>b.name);
+  const dates=[...new Set(scheds.map(s=>s.trip.process))].sort();
+  let h="<tr><th>Dato</th><th>Dag</th>"+boats.map(b=>`<th>${b}</th>`).join("")+"</tr>";
+  dates.forEach(d=>{const dd=dateAt(d,"00:00");
+    h+=`<tr><td>${d}</td><td>${DAGER[dd.getDay()]}</td>`;
+    boats.forEach(boat=>{let parts=[];
+      scheds.filter(s=>s.boat===boat&&s.trip.process===d).forEach(s=>{
+        s.stops.forEach(st=>parts.push(`${st.site_name} | ${st.count} stk / ${st.biomass_t.toFixed(1)} t | last ${fmtDT(st.load_start)}–${fmtT(st.load_finish)}${st.leg_missing?" ⚠ avstand mangler":""}`));
+        if(s.warnings.length) parts.push("Merknad: "+s.warnings.join("; "));
+      });
+      h+=`<td class="grid-cell">${parts.join("\n")}</td>`;});
+    h+="</tr>";});
+  $("t-grid").innerHTML=h;
+}
+function renderGantt(scheds){
+  const bars=[];
+  scheds.forEach(s=>{s.stops.forEach(st=>bars.push({boat:s.boat,label:"Last "+st.site_name,start:st.load_start,end:st.load_finish,cls:"b-load"}));
+    bars.push({boat:s.boat,label:"Loss+vask",start:s.unload_start||s.delivery,end:s.wash_end||s.delivery,cls:"b-port"});});
+  if(!bars.length){$("gantt").innerHTML="<span class='muted'>Ingen turer.</span>";return;}
+  const tmin=Math.min(...bars.map(b=>b.start.getTime())), tmax=Math.max(...bars.map(b=>b.end.getTime()));
+  const span=Math.max(1,tmax-tmin);
+  const boats=[...new Set(bars.map(b=>b.boat))];
+  let h="";
+  boats.forEach(boat=>{h+=`<div class="gantt-row"><div class="gantt-label">${boat}</div><div class="gantt-track">`;
+    bars.filter(b=>b.boat===boat).forEach(b=>{const l=(b.start.getTime()-tmin)/span*100, w=Math.max(0.5,(b.end-b.start)/span*100);
+      h+=`<div class="gantt-bar ${b.cls}" style="left:${l}%;width:${w}%" title="${b.label} ${fmtDT(b.start)}–${fmtDT(b.end)}">${b.label}</div>`;});
+    h+="</div></div>";});
+  h+=`<div class="muted" style="margin-top:6px">${fmtDT(new Date(tmin))} → ${fmtDT(new Date(tmax))} &nbsp; <span class="pill" style="background:#0969da;color:#fff">lasting</span> <span class="pill" style="background:#8250df;color:#fff">loss+vask</span></div>`;
+  $("gantt").innerHTML=h;
+}
+function renderConf(conf){
+  const errs=conf.filter(c=>c.severity==="feil").length, warns=conf.length-errs;
+  $("conf-summary").innerHTML= conf.length? `<span class="pill err">${errs} feil</span> <span class="pill warn">${warns} advarsler</span>` : `<span class="pill ok">Ingen konflikter funnet</span>`;
+  let h="<tr><th>Alvor</th><th>Type</th><th>Båt</th><th>Dato</th><th>Melding</th></tr>";
+  conf.forEach(c=>h+=`<tr><td><span class="pill ${c.severity==="feil"?"err":"warn"}">${c.severity}</span></td><td>${c.kind}</td><td>${c.boat||""}</td><td>${c.date||""}</td><td>${c.message}</td></tr>`);
+  $("t-conf").innerHTML= conf.length?h:"";
+}
+function renderDetail(scheds){
+  let h="<tr><th>Båt</th><th>Slaktedato</th><th>Stopp</th><th>Lokalitet</th><th>Antall</th><th>Tonn</th><th>Ankomst lok.</th><th>Last start</th><th>Last ferdig</th><th>Avgang</th><th>Seiling t→neste</th><th>Holdetid (t)</th><th>Avstand mangler</th></tr>";
+  scheds.forEach(s=>{s.stops.forEach((st,i)=>h+=`<tr><td>${s.boat}</td><td>${s.trip.process}</td><td>${i+1}</td><td>${st.site_name}</td><td>${st.count}</td><td>${st.biomass_t.toFixed(1)}</td><td>${fmtDT(st.arrival)}</td><td>${fmtDT(st.load_start)}</td><td>${fmtDT(st.load_finish)}</td><td>${fmtDT(st.departure)}</td><td>${st.sailing_to_next_h.toFixed(2)}</td><td>${st.holding_h.toFixed(1)}</td><td>${st.leg_missing?"JA":""}</td></tr>`);
+    h+=`<tr style="background:#f6f8fa"><td>${s.boat}</td><td>${s.trip.process}</td><td>→ levering</td><td>${state.config.station.name}</td><td></td><td></td><td>${fmtDT(s.delivery)}</td><td></td><td></td><td>${fmtDT(s.station_departure_clean)} (ren båt ut)</td><td></td><td>${Math.max(0,...s.stops.map(x=>x.holding_h)).toFixed(1)}</td><td></td></tr>`;});
+  $("t-detail").innerHTML=h;
+}
+
+// ---- eksport ----
+$("export-xlsx").onclick=()=>{
+  if(typeof XLSX==="undefined"){alert("Excel-biblioteket er ikke lastet (mangler internett?).");return;}
+  const {scheds,conflicts}=computeAll();
+  const boats=state.config.boats.filter(b=>b.active).map(b=>b.name);
+  const dates=[...new Set(scheds.map(s=>s.trip.process))].sort();
+  // Kjøreplan-ark
+  const grid=[["Dato","Dag",...boats]];
+  dates.forEach(d=>{const dd=dateAt(d,"00:00");const row=[d,DAGER[dd.getDay()]];
+    boats.forEach(boat=>{let parts=[];scheds.filter(s=>s.boat===boat&&s.trip.process===d).forEach(s=>{
+      s.stops.forEach(st=>parts.push(`${st.site_name} | ${st.count} stk / ${st.biomass_t.toFixed(1)} t | last ${fmtDT(st.load_start)}–${fmtT(st.load_finish)}${st.leg_missing?" ⚠ avstand mangler":""}`));
+      if(s.warnings.length)parts.push("Merknad: "+s.warnings.join("; "));});row.push(parts.join("\n"));});
+    grid.push(row);});
+  const detail=[["Båt","Slaktedato","Stopp","Lokalitet","Antall","Tonn","Ankomst lok.","Last start","Last ferdig","Avgang","Seiling t→neste","Holdetid (t)","Avstand mangler"]];
+  scheds.forEach(s=>{s.stops.forEach((st,i)=>detail.push([s.boat,s.trip.process,i+1,st.site_name,st.count,+st.biomass_t.toFixed(1),fmtDT(st.arrival),fmtDT(st.load_start),fmtDT(st.load_finish),fmtDT(st.departure),+st.sailing_to_next_h.toFixed(2),+st.holding_h.toFixed(1),st.leg_missing?"JA":""]));
+    detail.push([s.boat,s.trip.process,"→ levering",state.config.station.name,"","",fmtDT(s.delivery),"","",fmtDT(s.station_departure_clean)+" (ren båt ut)","",+Math.max(0,...s.stops.map(x=>x.holding_h)).toFixed(1),""]);});
+  const conf=[["Alvor","Type","Båt","Slaktedato","Melding"]];
+  conflicts.forEach(c=>conf.push([c.severity,c.kind,c.boat||"",c.date||"",c.message]));
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(grid),"Kjøreplan");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(detail),"Detaljer");
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(conf),"Konflikter");
+  XLSX.writeFile(wb,"kjoreplan.xlsx");
+};
+
+// ---- init ----
+renderDist(); renderLegs(); renderConfig();
+if(state.orders.length){$("plan-status").innerHTML=`<span class="muted">${state.orders.length} ordrer fra forrige økt (lagret lokalt).</span>`;}
+</script>
+</body>
+</html>

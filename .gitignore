@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+kjoreplan.db
+sample_data/*.xlsx
+.venv/

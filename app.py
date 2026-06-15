@@ -178,6 +178,15 @@ with tabs[2]:
     else:
         st.caption("Forslaget fra slakteplanens «Boat» er forhåndsfylt. Overstyr fritt. "
                    "trip_seq grupperer turer; stop_seq bestemmer rekkefølgen på stoppene.")
+        if st.button("🚀 Lag forslag automatisk (auto-tildeling)"):
+            assigns, unassigned = planner.auto_assign(st.session_state.orders, cfg)
+            st.session_state.assignments = assigns
+            db.save_assignments(con, assigns)
+            if unassigned:
+                st.warning(f"{len(unassigned)} ordre fikk ikke plass (kapasitet) – fordel manuelt "
+                           f"eller legg til en innleid båt i Konfig.")
+            st.success("Auto-forslag laget. Overstyr ved behov under.")
+            st.rerun()
         rows = []
         for o in st.session_state.orders:
             a = st.session_state.assignments.get(o.id, {})

@@ -12,10 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from kjoreplan.config import AppConfig
-from kjoreplan.models import Trip, Stop, Distance, InterSiteLeg
+from kjoreplan.models import Trip, Stop, Distance, InterSiteLeg, SlaughterOrder
 from kjoreplan.engine import (
     DistanceBook, compute_trip, apply_unloading_queue, check_conflicts,
 )
+from kjoreplan import planner
 
 TUE = date(2026, 6, 16)  # tirsdag
 
@@ -133,6 +134,38 @@ def test_holding_breach_only_when_set():
     # sett en lav grense -> konflikt
     cfg.plan.max_holding_hours = 1.0
     assert any(c.kind == "holdetid" for c in check_conflicts([s], cfg))
+
+
+def _order(oid, pdate, site_key, count, bio):
+    return SlaughterOrder(id=oid, process_date=pdate, proposed_boat=None, euth=None,
+                          pickup_date=None, site_name=f"Lok {site_key}", site_code=site_key,
+                          unit="", count=count, avg_weight_g=6500, biomass_t=bio,
+                          packing_station="Jøsnøya")
+
+
+def test_auto_assign_merges_and_splits():
+    cfg = base_config()  # store 600 t / 110k, små 220 t / 40k
+    orders = [
+        _order("a", TUE, "BDB", 79_000, 514),
+        _order("b", TUE, "BDB", 12_000, 78),   # samme dag/lok -> merges med a (592 t < 600)
+        _order("c", date(2026, 6, 17), "BDB", 74_000, 481),
+        _order("d", date(2026, 6, 17), "BDB", 19_000, 124),  # 605 t > 600 -> må splittes
+    ]
+    assigns, unassigned = planner.auto_assign(orders, cfg)
+    assert unassigned == []
+    # a og b på samme (store) båt
+    assert assigns["a"]["boat"] == assigns["b"]["boat"]
+    # c og d på hver sin båt (kapasitet sprenges hvis sammen)
+    assert assigns["c"]["boat"] != assigns["d"]["boat"]
+
+
+def test_auto_assign_overflow_unassigned():
+    cfg = base_config()
+    # 120k stk > 110k og 700 t > 600 -> passer ingen båt
+    orders = [_order("x", TUE, "KMP", 120_000, 700)]
+    assigns, unassigned = planner.auto_assign(orders, cfg)
+    assert [o.id for o in unassigned] == ["x"]
+    assert assigns["x"]["boat"] == ""
 
 
 def _run_all():

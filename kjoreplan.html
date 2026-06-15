@@ -6,6 +6,8 @@
 <title>Kjøreplan bløggebåter – Jøsnøya</title>
 <!-- SheetJS for Excel inn/ut. Krever internett ved åpning (du har det). -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<!-- Tesseract.js for bilde/OCR-avlesning (lastes ved behov). -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root{--bg:#f6f8fa;--bd:#d0d7de;--fg:#1f2328;--accent:#0969da;--warn:#9a6700;--warnbg:#fff8c5;--err:#cf222e;--errbg:#ffebe9;--ok:#1a7f37;--okbg:#dafbe1;}
   *{box-sizing:border-box}
@@ -63,11 +65,16 @@
 
   <!-- 1) IMPORT -->
   <section id="tab-import" class="tab active">
+    <div class="note ok">Last opp slakteplanen, så lager programmet <b>automatisk et forslag</b> til kjøreplan (båtvalg + tider). Du kan overstyre alt etterpå i fane 3.</div>
     <div class="row">
       <div class="card">
-        <h2>Slakteplan (.xlsx)</h2>
+        <h2>Slakteplan – Excel (.xlsx) <span class="pill ok">eksakt</span></h2>
         <input type="file" id="f-plan" accept=".xlsx,.xls">
-        <div class="filehint">Kolonner: Id, Process, Boat, Euth., Pickup time, Site, Unit, Count, Avg. weight, Biomass, Packing station. Robust mot rekkefølge.</div>
+        <div class="filehint">Kolonner: Id, Process, Boat, Euth., Pickup time, Site, Unit, Count, Avg. weight, Biomass, Packing station. Robust mot rekkefølge og ekstra kolonner.</div>
+        <h2 style="margin-top:16px">Slakteplan – Bilde / skjermbilde <span class="pill warn">må kontrolleres</span></h2>
+        <input type="file" id="f-image" accept="image/*">
+        <div class="filehint">Programmet leser av tallene automatisk (OCR). <b>Kontroller tallene</b> i fane 3 før du stoler på planen – OCR kan feillese tette talltabeller.</div>
+        <div id="ocr-status" class="muted" style="margin-top:8px"></div>
         <div id="plan-status" class="muted" style="margin-top:8px"></div>
       </div>
       <div class="card">
@@ -133,6 +140,8 @@
       <h2>Tildeling av båter</h2>
       <p class="muted">Forslaget fra slakteplanens «Boat» er forhåndsfylt – overstyr fritt. <b>trip_seq</b> grupperer turer (samme båt + slaktedato + trip_seq = én tur); <b>stop_seq</b> bestemmer rekkefølgen på stoppene. Rekkefølgen endres aldri automatisk.</p>
       <div id="assign-empty" class="note info">Importer en slakteplan først (fane 1).</div>
+      <div style="margin:6px 0 10px"><button class="act" id="auto-assign">🚀 Lag forslag automatisk</button>
+        <span class="muted" style="margin-left:8px">Velger båter og bygger turer (én lokalitet per tur). Overstyr fritt i tabellen under.</span></div>
       <div class="scroll"><table id="t-assign"></table></div>
       <button class="act" id="save-assign" style="margin-top:10px">Lagre tildeling</button>
     </div>
@@ -141,6 +150,8 @@
   <!-- 4) KJØREPLAN -->
   <section id="tab-plan" class="tab">
     <div id="plan-empty" class="note info">Importer en slakteplan først (fane 1).</div>
+    <div id="dist-banner"></div>
+    <div style="margin-bottom:12px"><button class="act" id="auto-assign2">🚀 Lag forslag automatisk på nytt</button></div>
     <div class="card">
       <h2>Rutenett (rader = dato, kolonner = båt)</h2>
       <div class="scroll"><table id="t-grid"></table></div>
@@ -283,6 +294,53 @@ function buildTrips(){
   return trips;
 }
 
+// ---------- AUTO-FORSLAG: tildel båter automatisk ----------
+// Greedy: per slaktedato pakkes ordrene i båter etter kapasitet (tonn ELLER
+// antall). Store båter fylles først. Én tur per båt per dag, og én lokalitet
+// per tur (slik trengs ingen seilingsledd mellom lokaliteter). Ordrer som ikke
+// får plass markeres som ufordelt og varsles. Forslaget kan overstyres fritt.
+function autoAssign(){
+  const asn={};
+  state.orders.forEach(o=>{asn[o.id]={boat:"",trip_seq:0,stop_seq:0};});
+  const unassigned=[];
+  // grupper ordrer per slaktedato
+  const byDate={};
+  state.orders.forEach(o=>{(byDate[o.process||"?"]=byDate[o.process||"?"]||[]).push(o);});
+  Object.keys(byDate).sort().forEach(d=>{
+    const orders=byDate[d].slice().sort((a,b)=>b.biomass_t-a.biomass_t);
+    // én "trip" per aktiv båt denne dagen; store båter først
+    const boats=state.config.boats.filter(b=>b.active)
+      .sort((a,b)=>b.cap_tonnes-a.cap_tonnes||b.cap_count-a.cap_count)
+      .map(b=>({name:b.name, capT:b.cap_tonnes, capC:b.cap_count, site:null, usedT:0, usedC:0}));
+    orders.forEach(o=>{
+      // respekter evt. forslag fra slakteplanens Boat-kolonne hvis det finnes og passer
+      let target=null;
+      const proposed=(o.boat_proposed||"").trim();
+      if(proposed){
+        const pb=boats.find(b=>b.name.toLowerCase()===proposed.toLowerCase());
+        if(pb&&(pb.site===null||norm(pb.site)===norm(o.site_key))&&pb.usedT+o.biomass_t<=pb.capT+1e-9&&pb.usedC+o.count<=pb.capC) target=pb;
+      }
+      if(!target){
+        // foretrekk båt som allerede laster samme lokalitet (merger til ett stopp)
+        target=boats.find(b=>b.site!==null&&norm(b.site)===norm(o.site_key)&&b.usedT+o.biomass_t<=b.capT+1e-9&&b.usedC+o.count<=b.capC);
+      }
+      if(!target){
+        // ellers neste ledige (tomme) båt – store først
+        target=boats.find(b=>b.site===null&&o.biomass_t<=b.capT+1e-9&&o.count<=b.capC);
+      }
+      if(target){
+        if(target.site===null) target.site=o.site_key;
+        target.usedT+=o.biomass_t; target.usedC+=o.count;
+        asn[o.id]={boat:target.name, trip_seq:0, stop_seq:0};
+      }else{
+        unassigned.push(o);
+      }
+    });
+  });
+  state.assignments=asn; saveState();
+  return unassigned;
+}
+
 // ---------- baklengs tidsberegning ----------
 function computeTrip(trip){
   const cfg=state.config, book=makeBook();
@@ -408,8 +466,11 @@ function importPlan(rows){
   rows.forEach((row,idx)=>{
     const g=f=>cm[f]!=null?row[cm[f]]:null;
     if(g("site")==null) return;
+    // hopp over sumrader o.l. ("Totals")
+    if(Object.values(row).some(v=>typeof v==="string"&&/total/i.test(v))) return;
     const {name,code}=splitSite(g("site"));
     const count=toInt(g("count")), avg=toFloat(g("avg_weight")); let bio=toFloat(g("biomass"));
+    if(count<=0&&bio<=0) return;
     if(bio<=0&&count>0&&avg>0) bio=count*avg/1e6;
     const id=g("id")!=null?String(g("id")).trim():("rad"+idx);
     orders.push({id, process:isoDate(g("process")), boat_assigned:null,
@@ -456,15 +517,44 @@ function importLegs(rows){
   return {legs:out,warn:[]};
 }
 
+// ---- OCR: les av tabell fra et skjermbilde (best-effort, må kontrolleres) ----
+function parseOCRText(text){
+  const orders=[]; let idx=0;
+  text.split(/\r?\n/).forEach(line=>{
+    const dates=[...line.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map(m=>m[1]);
+    const idm=line.match(/\b(\d{5,7})\b/);                       // ordre-ID
+    const countm=line.match(/\b(\d{1,3}(?:[ ,.]\d{3})+)\b/);     // 100,000 / 79 000
+    if(!idm || !countm) return;                                   // hopp over header/totaler
+    const sitem=line.match(/([A-Za-zÆØÅæøåÄÖäöÉé'’.\- ]{3,}?\(([A-Za-z.]{1,6})\))/);
+    const avgm=line.match(/([\d ,.]+?)\s*g\b/);
+    const biom=line.match(/(\d+(?:[.,]\d+)?)\s*t\b/);
+    const unitm=line.match(/\b(0\d{3})\b/);
+    let siteName="(ukjent)", code=null;
+    if(sitem){siteName=sitem[1].trim(); code=sitem[2];}
+    const count=toInt((countm[1]||"").replace(/[ ,.]/g,""));
+    const avg=toFloat((avgm?avgm[1]:"").replace(/[ ,]/g,""));
+    let bio=toFloat(biom?biom[1].replace(",", "."):0);
+    if(bio<=0&&count>0&&avg>0) bio=count*avg/1e6;
+    orders.push({id:idm[1]||("ocr"+idx), process:dates[0]||null, boat_assigned:null,
+      boat_proposed:null, euth:null, pickup:dates[1]||null, site_name:siteName, site_code:code,
+      site_key:siteKeyFromCode(siteName,code), unit:unitm?unitm[1]:"", count, avg_weight:avg,
+      biomass_t:bio, station:"Jøsnøya"});
+    idx++;
+  });
+  return orders;
+}
+
 /* ====================== UI ====================== */
 function $(id){return document.getElementById(id);}
-document.querySelectorAll(".tabs button").forEach(btn=>btn.onclick=()=>{
-  document.querySelectorAll(".tabs button").forEach(b=>b.classList.remove("active"));
+function switchTab(name){
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));
   document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-  btn.classList.add("active"); $("tab-"+btn.dataset.tab).classList.add("active");
-  if(btn.dataset.tab==="tildeling") renderAssign();
-  if(btn.dataset.tab==="plan") renderPlan();
-});
+  $("tab-"+name).classList.add("active");
+  if(name==="tildeling") renderAssign();
+  if(name==="plan") renderPlan();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll(".tabs button").forEach(btn=>btn.onclick=()=>switchTab(btn.dataset.tab));
 
 // lib-sjekk
 window.addEventListener("load",()=>{
@@ -474,16 +564,35 @@ window.addEventListener("load",()=>{
 });
 
 // ---- import-handlere ----
-$("f-plan").onchange=e=>{const f=e.target.files[0];if(!f)return;readSheet(f).then(rows=>{
-  const {orders,warn}=importPlan(rows);
+let lastUnassigned=[];
+function afterOrdersLoaded(orders,warn,statusEl,gotoReview){
   state.orders=orders;
-  // bygg default-tildelinger, behold lagrede der de finnes
-  const saved=state.assignments||{}; const asn={};
-  orders.forEach(o=>{asn[o.id]=saved[o.id]||{boat:o.boat_proposed||"",trip_seq:0,stop_seq:0};});
-  state.assignments=asn; saveState();
-  $("plan-status").innerHTML=`Leste <b>${orders.length}</b> ordrer.`+(warn.length?` <span class="pill warn">${warn.length} merknad</span>`:"");
-  warn.forEach(w=>$("plan-status").innerHTML+=`<div class="note warn">${w}</div>`);
-}).catch(err=>$("plan-status").innerHTML=`<div class="note err">Feil ved lesing: ${err}</div>`);};
+  lastUnassigned=autoAssign();   // lag forslag automatisk
+  let msg=`Leste <b>${orders.length}</b> ordrer og laget forslag automatisk.`;
+  if(warn.length) msg+=` <span class="pill warn">${warn.length} merknad</span>`;
+  if(lastUnassigned.length) msg+=` <span class="pill err">${lastUnassigned.length} ordre fikk ikke plass</span>`;
+  statusEl.innerHTML=msg;
+  warn.forEach(w=>statusEl.innerHTML+=`<div class="note warn">${w}</div>`);
+  switchTab(gotoReview?"tildeling":"plan");
+}
+$("f-plan").onchange=e=>{const f=e.target.files[0];if(!f)return;
+  $("plan-status").textContent="Leser Excel …";
+  readSheet(f).then(rows=>{const r=importPlan(rows);afterOrdersLoaded(r.orders, r.warn, $("plan-status"), false);})
+  .catch(err=>$("plan-status").innerHTML=`<div class="note err">Feil ved lesing: ${err}</div>`);};
+
+// ---- bilde / OCR ----
+$("f-image").onchange=e=>{const f=e.target.files[0];if(!f)return;
+  if(typeof Tesseract==="undefined"){$("ocr-status").innerHTML='<div class="note err">OCR-biblioteket ble ikke lastet (mangler internett?). Bruk Excel-opplasting i stedet.</div>';return;}
+  $("ocr-status").innerHTML='<div class="note info">Leser av bildet … dette kan ta noen sekunder. <span id="ocr-pct"></span></div>';
+  Tesseract.recognize(f,"eng",{logger:m=>{if(m.status==="recognizing text"){const p=document.getElementById("ocr-pct");if(p)p.textContent=Math.round(m.progress*100)+"%";}}})
+    .then(({data})=>{
+      const orders=parseOCRText(data.text);
+      if(!orders.length){$("ocr-status").innerHTML='<div class="note warn">Fant ingen rader i bildet. Prøv et skarpere/større skjermbilde, eller bruk Excel.</div>';return;}
+      $("ocr-status").innerHTML=`<div class="note warn">Leste <b>${orders.length}</b> rader fra bildet. <b>Kontroller alle tall i fane 3</b> før du bruker planen!</div>`;
+      afterOrdersLoaded(orders,[],$("ocr-status"),true);  // -> til Tildeling for kontroll
+    })
+    .catch(err=>$("ocr-status").innerHTML=`<div class="note err">OCR feilet: ${err}</div>`);
+};
 
 $("f-dist").onchange=e=>{const f=e.target.files[0];if(!f)return;readSheet(f).then(rows=>{
   const {dist,warn}=importDistances(rows); state.distances=dist; saveState(); renderDist();
@@ -570,11 +679,23 @@ function renderAssign(){
 window.asnEd=(id,f,v)=>{const a=state.assignments[id]=state.assignments[id]||{boat:"",trip_seq:0,stop_seq:0};
   a[f]= (f==="boat")? v : toInt(v);};
 $("save-assign").onclick=()=>{saveState();alert("Tildeling lagret.");};
+function doAutoAssign(goPlan){
+  if(!state.orders.length){alert("Importer en slakteplan først (fane 1).");return;}
+  lastUnassigned=autoAssign();
+  if(lastUnassigned.length) alert(`${lastUnassigned.length} ordre fikk ikke plass på noen båt (kapasitet). De vises uten båt – fordel manuelt eller legg til en innleid båt i Konfig.`);
+  switchTab(goPlan?"plan":"tildeling");
+}
+$("auto-assign").onclick=()=>doAutoAssign(false);
+$("auto-assign2").onclick=()=>doAutoAssign(true);
 
 // ---- kjøreplan ----
 function renderPlan(){
   if(!state.orders.length){$("plan-empty").style.display="block";return;}
   $("plan-empty").style.display="none";
+  $("dist-banner").innerHTML = state.distances.length ? ""
+    : '<div class="note warn">⚠ Ingen avstander lagt inn ennå – lastetidspunktene er <b>foreløpige</b> (seiling regnes som 0 t). Båtvalg og kapasitet stemmer. Legg inn avstander i fane 1 for korrekte tider.</div>';
+  const ufordelt = (typeof lastUnassigned!=="undefined"?lastUnassigned:[]).filter(o=>!(state.assignments[o.id]&&state.assignments[o.id].boat));
+  if(ufordelt.length) $("dist-banner").innerHTML += `<div class="note err">${ufordelt.length} ordre er ufordelt (fikk ikke plass). De er ikke med i planen under.</div>`;
   const {scheds,conflicts}=computeAll();
   renderGrid(scheds); renderGantt(scheds); renderConf(conflicts); renderDetail(scheds);
 }

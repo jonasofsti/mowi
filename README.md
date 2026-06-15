@@ -29,6 +29,20 @@ går via SheetJS (lastes fra nett ved åpning – krever internett), og all logi
 lagring skjer lokalt i nettleseren (localStorage). Beregningsmotoren er en port av
 Python-versjonen og gir **identiske** tall (verifisert).
 
+**Én handling → ferdig forslag:** Last opp slakteplanen, så lager programmet
+**automatisk** et forslag til kjøreplan (velger båter, slår sammen ordrer til
+turer, regner tider). Du kan overstyre alt i fane 3.
+
+- **Excel-fil** (eksakt) eller **bilde/skjermbilde** (OCR via Tesseract.js – leses
+  av automatisk, men **må kontrolleres** før bruk).
+- **Avstander** legges inn én gang og huskes; uten dem lages forslaget likevel,
+  men lastetidspunktene er foreløpige (seiling = 0) til avstandene er på plass.
+
+**Auto-tildeling (forslag):** greedy per slaktedato – store båter fylles først,
+én tur per båt per dag, og én lokalitet per tur (slik trengs ingen seilingsledd).
+Samme lokalitet samme dag slås sammen; dager over kapasitet splittes på flere
+båter; ordrer uten plass markeres som ufordelt.
+
 > Trenger du en helt offline-versjon (uten internett), kan Excel-biblioteket
 > bygges inn i fila – si fra.
 
@@ -109,7 +123,8 @@ at FIFO-køen på losseplassen er korrekt.
 
 ## Status / neste steg
 
-- ✅ v1: import, tildeling med manuell overstyring, full baklengs tidsberegning
-  med kø, konfliktsjekk, Gantt og Excel inn/ut i rutenett-format.
-- ⏭️ Steg 2: auto-forslag til tildeling (optimering) og forslag til bedre
-  stopprekkefølge.
+- ✅ v1: import (Excel/bilde-OCR), **auto-forslag til tildeling**, manuell
+  overstyring, full baklengs tidsberegning med kø, konfliktsjekk, Gantt og Excel
+  inn/ut i rutenett-format.
+- ⏭️ Videre: smartere optimering (fler-stopp-turer når avstander finnes, minimere
+  antall turer/holdetid på tvers av dager), og forslag til bedre stopprekkefølge.

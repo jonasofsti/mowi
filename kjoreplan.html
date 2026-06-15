@@ -78,9 +78,15 @@
         <div id="plan-status" class="muted" style="margin-top:8px"></div>
       </div>
       <div class="card">
-        <h2>Avstander lokalitet → slakteri (.xlsx)</h2>
+        <h2>Avstander lokalitet → slakteri</h2>
         <input type="file" id="f-dist" accept=".xlsx,.xls">
-        <div class="filehint">Smalt ark: Lokalitet | N.M. | Seilingstid. Eller bredt med kolonner per slakteri (Jøsnøya/Ulvan/Herøy).</div>
+        <div class="filehint">Excel: smalt ark «Lokalitet | N.M. | Seilingstid», eller bredt med kolonner per slakteri (Jøsnøya/Ulvan/Herøy).</div>
+        <div style="margin-top:8px">
+          <label>…eller lim inn (én lokalitet per linje: <code>Lokalitet&nbsp;N.M.&nbsp;[Seilingstid]</code>, skilt med tab/semikolon/mellomrom)</label>
+          <textarea id="dist-paste" rows="4" style="width:100%;font-family:monospace;font-size:12px" placeholder="Grøttingsøya (BDB)&#9;21&#10;Mannbruholmen (MBH)&#9;42&#10;Langholmen (LGH)&#9;336"></textarea>
+          <button class="act" id="dist-paste-btn" style="margin-top:6px">Lim inn avstander</button>
+          <span id="dist-paste-status" class="muted" style="margin-left:8px"></span>
+        </div>
         <h2 style="margin-top:14px">Seilingsledd mellom lokaliteter (valgfritt)</h2>
         <input type="file" id="f-legs" accept=".xlsx,.xls">
         <div class="filehint">Ark med kolonnene Fra | Til | N.M.</div>
@@ -504,6 +510,20 @@ function importDistances(rows){
   }
   return {dist:out,warn:out.length?[]:["Fant ingen avstandsrader."]};
 }
+function parseDistText(text){
+  const out=[];
+  text.split(/\r?\n/).forEach(line=>{
+    if(!line.trim()) return;
+    // navn (kan inneholde mellomrom og «(KODE)») + N.M. + valgfri seilingstid
+    const m=line.match(/^\s*(.+?)[\s\t;,]+(\d+(?:[.,]\d+)?)(?:[\s\t;,]+(\d+(?:[.,]\d+)?))?\s*$/);
+    if(!m) return;
+    const {name,code}=splitSite(m[1].trim());
+    const nm=toFloat(m[2]); const t=m[3]?toFloat(m[3]):null;
+    out.push({site_key:(code||name).trim(), station:"Jøsnøya", nm, sailing_time_h:(t&&t>0)?t:null});
+  });
+  return out;
+}
+
 function importLegs(rows){
   if(!rows.length) return {legs:[],warn:["Tomt ark."]};
   const nm={}; Object.keys(rows[0]).forEach(h=>nm[norm(h)]=h);
@@ -598,6 +618,16 @@ $("f-dist").onchange=e=>{const f=e.target.files[0];if(!f)return;readSheet(f).the
   const {dist,warn}=importDistances(rows); state.distances=dist; saveState(); renderDist();
   alert(`Lagret ${dist.length} avstander.`+(warn.length?"\n"+warn.join("\n"):""));
 });};
+$("dist-paste-btn").onclick=()=>{
+  const dist=parseDistText($("dist-paste").value);
+  if(!dist.length){$("dist-paste-status").innerHTML='<span class="pill warn">Fant ingen linjer – sjekk formatet</span>';return;}
+  // slå sammen med eksisterende (oppdater/legg til per lokalitet)
+  const map={}; state.distances.forEach(d=>map[norm(d.site_key)+"|"+norm(d.station)]=d);
+  dist.forEach(d=>map[norm(d.site_key)+"|"+norm(d.station)]=d);
+  state.distances=Object.values(map); saveState(); renderDist();
+  $("dist-paste-status").innerHTML=`<span class="pill ok">Lagret ${dist.length} avstander ✓</span>`;
+  $("dist-paste").value="";
+};
 $("f-legs").onchange=e=>{const f=e.target.files[0];if(!f)return;readSheet(f).then(rows=>{
   const {legs,warn}=importLegs(rows); state.legs=legs; saveState(); renderLegs();
   alert(`Lagret ${legs.length} ledd.`+(warn.length?"\n"+warn.join("\n"):""));

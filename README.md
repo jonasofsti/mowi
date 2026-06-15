@@ -35,8 +35,11 @@ turer, regner tider). Du kan overstyre alt i fane 3.
 
 - **Excel-fil** (eksakt) eller **bilde/skjermbilde** (OCR via Tesseract.js – leses
   av automatisk, men **må kontrolleres** før bruk).
-- **Avstander** legges inn én gang og huskes; uten dem lages forslaget likevel,
-  men lastetidspunktene er foreløpige (seiling = 0) til avstandene er på plass.
+- **Avstander** legges inn én gang og huskes (Excel-import eller «lim inn»-felt:
+  `Lokalitet  N.M.  [Seilingstid]`); uten dem lages forslaget likevel, men
+  lastetidspunktene er foreløpige (seiling = 0) til avstandene er på plass.
+  (Merk: BarentsWatch o.l. gir kun *posisjoner/luftlinje*, ikke reell seiling –
+  bruk derfor dine egne N.M. fra historiske planer.)
 
 **Auto-tildeling (forslag):** greedy per slaktedato – store båter fylles først,
 én tur per båt per dag, og én lokalitet per tur (slik trengs ingen seilingsledd).

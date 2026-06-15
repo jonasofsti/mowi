@@ -223,7 +223,7 @@ with tabs[2]:
 def compute_all():
     dists = db.load_distances(con)
     legs = db.load_legs(con)
-    book = DistanceBook(dists, legs)
+    book = DistanceBook(dists, legs, station=cfg.station.name)
     trips = planner.build_trips(st.session_state.orders, st.session_state.assignments)
     scheds = [compute_trip(t, cfg, book) for t in trips]
     apply_unloading_queue(scheds, cfg)

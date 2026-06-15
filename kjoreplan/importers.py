@@ -145,6 +145,47 @@ DIST_ALIASES = {
 }
 
 
+def _read_distances_value_layout(df, norm, site_col, station_default) -> list[Distance]:
+    """Parse layout med «Slakteri | N.M. | … | Seilingstid»-blokker per rad.
+
+    Slakteriet ligger i en verdikolonne (Herøy/Ulvan/Jøsnøya). Vi parer hver
+    Slakteri-kolonne med tilhørende N.M.- og Seilingstid-kolonne (samme suffiks),
+    og lager én Distance per (lokalitet, slakteri).
+    """
+    # finn suffikser ('', '.1', '.2', ...) for Slakteri-kolonnene
+    out: list[Distance] = []
+    suffixes = []
+    for c in norm:
+        if c == "slakteri":
+            suffixes.append("")
+        elif c.startswith("slakteri."):
+            suffixes.append(c[len("slakteri"):])  # '.1', '.2'
+    pairs = []
+    for suf in suffixes:
+        scol = norm.get("slakteri" + suf)
+        ncol = norm.get("n.m." + suf) or norm.get("nm" + suf)
+        tcol = norm.get("seilingstid" + suf)
+        if scol and ncol:
+            pairs.append((scol, ncol, tcol))
+    for _, row in df.iterrows():
+        raw_site = row[site_col]
+        if raw_site is None or (isinstance(raw_site, float) and pd.isna(raw_site)):
+            continue
+        site_name, code = split_site(raw_site)
+        key = (code or site_name).strip()
+        for scol, ncol, tcol in pairs:
+            station = row[scol]
+            if station is None or (isinstance(station, float) and pd.isna(station)):
+                continue
+            nm = _to_float(row[ncol], default=-1)
+            if nm < 0:
+                continue
+            t = _to_float(row[tcol], default=0) if tcol else 0
+            out.append(Distance(site_key=key, station=str(station).strip(), nm=nm,
+                                sailing_time_h=(t if t and t > 0 else None)))
+    return out
+
+
 def read_distances(path_or_buf, sheet_name=0, station_default="Jøsnøya") -> tuple[list[Distance], list[str]]:
     """Les avstander. Støtter både smalt ark (Lokalitet|N.M.|Seilingstid) og
     bredt ark med kolonner per slakteri (Herøy/Ulvan/Jøsnøya)."""
@@ -161,6 +202,11 @@ def read_distances(path_or_buf, sheet_name=0, station_default="Jøsnøya") -> tu
     if site_col is None:
         warnings.append("Fant ikke lokalitet-kolonne i avstandsarket.")
         return [], warnings
+
+    # Layout der slakteriet står i VERDI-kolonner (gjentatte «Slakteri | N.M. |
+    # ... | Seilingstid»-blokker per slakteri), ikke som kolonneoverskrift.
+    if any(c == "slakteri" or c.startswith("slakteri.") for c in norm):
+        return _read_distances_value_layout(df, norm, site_col, station_default), warnings
 
     # Finn slakteri-kolonner (bredt format): kolonner som matcher kjente slakterier.
     station_cols = {c: orig for c, orig in norm.items()

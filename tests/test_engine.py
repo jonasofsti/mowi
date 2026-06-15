@@ -136,6 +136,19 @@ def test_holding_breach_only_when_set():
     assert any(c.kind == "holdetid" for c in check_conflicts([s], cfg))
 
 
+def test_distance_matches_on_name_not_just_code():
+    cfg = base_config()
+    # avstandsark uten kode (bare navn), slakteplan med kode i parentes
+    book = DistanceBook([Distance("Grøttingsøya", "Jøsnøya", nm=40.8)], [])
+    trip = Trip(boat="Tautiki", process_date=TUE,
+                stops=[Stop(site_key="BDB", site_name="Grøttingsøya (BDB)",
+                            count=30_000, biomass_t=120.0)])
+    s = compute_trip(trip, cfg, book)
+    assert s.stops[0].leg_missing is False  # matchet på navn
+    # 40.8 nm / 10.5 kn skal gi seiling != 0
+    assert s.stops[0].sailing_to_next_h > 0
+
+
 def _order(oid, pdate, site_key, count, bio):
     return SlaughterOrder(id=oid, process_date=pdate, proposed_boat=None, euth=None,
                           pickup_date=None, site_name=f"Lok {site_key}", site_code=site_key,

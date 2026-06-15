@@ -255,13 +255,28 @@ function fmtDT(d){return `${pad(d.getDate())}.${pad(d.getMonth()+1)} ${pad(d.get
 function fmtT(d){return `${pad(d.getHours())}:${pad(d.getMinutes())}`;}
 
 // ---------- avstandsbok ----------
+// Matcher på BÅDE kode og navn: slakteplanen bruker «Grøttingsøya (BDB)»,
+// avstandsark bruker ofte bare «Grøttingsøya». Indekser derfor på begge.
+function plainName(s){return splitSite(s||"").name.replace(/\([^)]*\)\s*$/,"").trim();}
 function makeBook(){
   const toStation={}, legs={};
-  state.distances.forEach(d=>{toStation[norm(d.site_key)]=d;});
+  // bruk avstander for det konfigurerte slakteriet; fall tilbake til alle hvis ingen treff
+  const stn=norm(state.config.station.name);
+  const want=state.distances.filter(d=>norm(d.station)===stn);
+  const use=want.length?want:state.distances;
+  use.forEach(d=>{
+    toStation[norm(d.site_key)]=d;
+    const pn=norm(plainName(d.site_key)); if(pn&&!toStation[pn]) toStation[pn]=d;
+  });
   state.legs.forEach(l=>{legs[norm(l.from_key)+"|"+norm(l.to_key)]=l.nm; legs[norm(l.to_key)+"|"+norm(l.from_key)]=l.nm;});
+  function lk(key,name){
+    let d=toStation[norm(key)];
+    if(!d&&name){d=toStation[norm(plainName(name))]||toStation[norm(name)];}
+    return d;
+  }
   return {
-    nmToStation:k=>{const d=toStation[norm(k)];return d?d.nm:null;},
-    directTime:k=>{const d=toStation[norm(k)];return (d&&d.sailing_time_h)?d.sailing_time_h:null;},
+    nmToStation:(k,name)=>{const d=lk(k,name);return d?d.nm:null;},
+    directTime:(k,name)=>{const d=lk(k,name);return (d&&d.sailing_time_h)?d.sailing_time_h:null;},
     nmBetween:(a,b)=>{if(norm(a)===norm(b))return 0;const v=legs[norm(a)+"|"+norm(b)];return v==null?null:v;}
   };
 }
@@ -359,7 +374,7 @@ function computeTrip(trip){
   for(let i=n-1;i>=0;i--){
     const stop=trip.stops[i]; let sailH=0, legMissing=false;
     if(i===n-1){
-      const direct=book.directTime(stop.site_key), nm=book.nmToStation(stop.site_key);
+      const direct=book.directTime(stop.site_key,stop.site_name), nm=book.nmToStation(stop.site_key,stop.site_name);
       if(direct!=null){sailH=direct;}
       else if(nm!=null){sailH=sailingH(nm,trip.boat);}
       else{legMissing=true; warnings.push(`Mangler avstand for lokalitet «${stop.site_name}» → ${cfg.station.name}. Seilingsledd satt til 0 t (ikke gjettet).`);}
@@ -378,7 +393,7 @@ function computeTrip(trip){
     nextArrival=loadStart;
   }
   acc.reverse(); sched.stops=acc;
-  const first=acc[0]; const d0=book.directTime(first.site_key), nm0=book.nmToStation(first.site_key);
+  const first=acc[0]; const d0=book.directTime(first.site_key,first.site_name), nm0=book.nmToStation(first.site_key,first.site_name);
   let back= d0!=null?d0:(nm0!=null?sailingH(nm0,trip.boat):0);
   sched.station_departure_clean=addH(first.arrival,-back);
   acc.forEach(s=>{s.holding_h=diffH(delivery,s.load_finish);});
@@ -491,9 +506,30 @@ function importPlan(rows){
 }
 function importDistances(rows){
   if(!rows.length) return {dist:[],warn:["Tomt ark."]};
-  const nm={}; Object.keys(rows[0]).forEach(h=>nm[norm(h)]=h);
+  const headers=Object.keys(rows[0]);
+  const nm={}; headers.forEach(h=>nm[norm(h)]=h);
   const siteCol=["lokalitet","site","location"].map(a=>nm[a]).find(Boolean);
   if(!siteCol) return {dist:[],warn:["Fant ikke lokalitet-kolonne."]};
+
+  // Layout der slakteriet står i VERDI-kolonner (gjentatte «Slakteri | N.M. |
+  // … | Seilingstid»-blokker). Par kolonner etter rekkefølge.
+  const pairs=[]; let cur=null;
+  headers.forEach(h=>{const n=norm(h);
+    if(n==="slakteri"||n.startsWith("slakteri_")||n.startsWith("slakteri.")){cur={s:h,nm:null,t:null};pairs.push(cur);}
+    else if(cur&&cur.nm===null&&(n.startsWith("n.m.")||n==="nm"||n.startsWith("nm_")||n.startsWith("nm."))){cur.nm=h;}
+    else if(cur&&cur.t===null&&n.startsWith("seilingstid")){cur.t=h;}
+  });
+  if(pairs.some(p=>p.nm)){
+    const vout=[];
+    rows.forEach(r=>{const raw=r[siteCol];if(raw==null||String(raw).trim()==="")return;
+      const {name,code}=splitSite(raw); const key=(code||name).trim();
+      pairs.forEach(p=>{const station=r[p.s]; if(station==null||String(station).trim()==="")return;
+        const v=toFloat(r[p.nm],-1); if(v<0)return;
+        const t=p.t?toFloat(r[p.t],0):0;
+        vout.push({site_key:key,station:String(station).trim(),nm:v,sailing_time_h:(t&&t>0)?t:null});});});
+    return {dist:vout,warn:vout.length?[]:["Fant ingen avstandsrader (verdi-layout)."]};
+  }
+
   const stationKeys=["jøsnøya","josnoya","jösnöya","ulvan","herøy","heroy"];
   const stCols=Object.keys(nm).filter(k=>stationKeys.includes(k));
   const out=[];

@@ -20,23 +20,41 @@ from .models import (
 # ----------------------------------------------------------------------------
 
 class DistanceBook:
-    """Slår opp avstander lokalitet->slakteri og ledd mellom lokaliteter."""
+    """Slår opp avstander lokalitet->slakteri og ledd mellom lokaliteter.
 
-    def __init__(self, distances: list[Distance], legs: list[InterSiteLeg]):
+    Matcher på BÅDE kode og navn: slakteplanen bruker «Grøttingsøya (BDB)»,
+    mens avstandsark ofte bruker bare «Grøttingsøya». Begge indekseres.
+    """
+
+    def __init__(self, distances: list[Distance], legs: list[InterSiteLeg],
+                 station: Optional[str] = None):
+        # bruk avstander for det konfigurerte slakteriet; fall tilbake til alle
+        if station:
+            want = [d for d in distances if _norm(d.station) == _norm(station)]
+            distances = want or distances
         self._to_station: dict[str, Distance] = {}
         for d in distances:
             self._to_station[_norm(d.site_key)] = d
+            pn = _norm(_plain_name(d.site_key))
+            if pn and pn not in self._to_station:
+                self._to_station[pn] = d
         self._legs: dict[tuple[str, str], float] = {}
         for lg in legs:
             self._legs[(_norm(lg.from_key), _norm(lg.to_key))] = lg.nm
             self._legs[(_norm(lg.to_key), _norm(lg.from_key))] = lg.nm  # symmetrisk
 
-    def nm_to_station(self, site_key: str) -> Optional[float]:
+    def _lookup(self, site_key: str, name: Optional[str]) -> Optional[Distance]:
         d = self._to_station.get(_norm(site_key))
+        if d is None and name:
+            d = self._to_station.get(_norm(_plain_name(name))) or self._to_station.get(_norm(name))
+        return d
+
+    def nm_to_station(self, site_key: str, name: Optional[str] = None) -> Optional[float]:
+        d = self._lookup(site_key, name)
         return d.nm if d else None
 
-    def direct_time_to_station(self, site_key: str) -> Optional[float]:
-        d = self._to_station.get(_norm(site_key))
+    def direct_time_to_station(self, site_key: str, name: Optional[str] = None) -> Optional[float]:
+        d = self._lookup(site_key, name)
         return d.sailing_time_h if d and d.sailing_time_h is not None else None
 
     def nm_between(self, from_key: str, to_key: str) -> Optional[float]:
@@ -47,6 +65,12 @@ class DistanceBook:
 
 def _norm(s: str) -> str:
     return (s or "").strip().lower()
+
+
+def _plain_name(s: str) -> str:
+    """«Grøttingsøya (BDB)» -> «Grøttingsøya» (uten kode i parentes)."""
+    import re as _re
+    return _re.sub(r"\([^)]*\)\s*$", "", (s or "")).strip()
 
 
 def sailing_hours(nm: float, boat_name: str, config: AppConfig) -> float:
@@ -112,8 +136,8 @@ def compute_trip(trip: Trip, config: AppConfig, book: DistanceBook) -> TripSched
         stop = trip.stops[i]
         if i == n - 1:
             # siste stopp -> seiler direkte til slakteriet
-            nm = book.nm_to_station(stop.site_key)
-            direct = book.direct_time_to_station(stop.site_key)
+            nm = book.nm_to_station(stop.site_key, stop.site_name)
+            direct = book.direct_time_to_station(stop.site_key, stop.site_name)
             if direct is not None:
                 sail_h = direct
                 leg_missing = False
@@ -161,8 +185,8 @@ def compute_trip(trip: Trip, config: AppConfig, book: DistanceBook) -> TripSched
 
     # Ren båt forlater slakteriet for å nå første stopp.
     first = stop_scheds[0]
-    nm0 = book.nm_to_station(first.site_key)
-    direct0 = book.direct_time_to_station(first.site_key)
+    nm0 = book.nm_to_station(first.site_key, first.site_name)
+    direct0 = book.direct_time_to_station(first.site_key, first.site_name)
     if direct0 is not None:
         back_h = direct0
     elif nm0 is not None:

@@ -2,4 +2,6 @@ __pycache__/
 *.pyc
 kjoreplan.db
 sample_data/*.xlsx
+# genererte/personlige driftsdata-filer (avstander, slakteplaner o.l.) – ikke i repo
+*.xlsx
 .venv/

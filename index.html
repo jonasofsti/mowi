@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fôrprognose – Vest &amp; Midt</title>
+<!-- Lokale (vendor) bibliotek – ingen internett/CDN nødvendig -->
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f6f8; --card:#fff; --ink:#1f2933; --muted:#6b7280; --line:#e2e8f0;
+    --offensiv:#d64545; --realistisk:#2f9e44; --defensiv:#1c7ed6; --warn:#b7791f;
+    --accent:#0b6e99;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.45;font-size:15px}
+  header.app{background:#0b3d57;color:#fff;padding:18px 22px}
+  header.app h1{margin:0;font-size:20px}
+  header.app p{margin:4px 0 0;opacity:.85;font-size:13px}
+  main{max-width:1180px;margin:0 auto;padding:18px 22px 60px}
+  .toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:14px 0}
+  .toolbar input[type=file]{font-size:14px}
+  button{cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:7px;
+    padding:8px 14px;font-size:14px;color:var(--ink)}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button:hover{filter:brightness(.97)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:16px 18px;margin:14px 0;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .msg{padding:12px 14px;border-radius:8px;margin:12px 0;font-size:14px}
+  .msg.err{background:#fdecec;border:1px solid #f5b5b5;color:#922}
+  .msg.ok{background:#e8f6ee;border:1px solid #aedcbf;color:#256}
+  .msg.warn{background:#fff7e6;border:1px solid #f0d089;color:#8a5a00}
+  .hidden{display:none}
+  .tabs{display:flex;gap:6px;margin:18px 0 4px;flex-wrap:wrap}
+  .tabs button{border-radius:8px 8px 0 0}
+  .tabs button.active{background:#0b3d57;color:#fff;border-color:#0b3d57}
+  h2.region{margin:6px 0 0;font-size:18px;border-bottom:2px solid #0b3d57;padding-bottom:6px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:14px 0}
+  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+  .kpi .lab{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .kpi .val{font-size:22px;font-weight:600;margin-top:2px}
+  .kpi .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:13px;font-weight:600;color:#fff}
+  .b-off{background:var(--offensiv)} .b-real{background:var(--realistisk)} .b-def{background:var(--defensiv)}
+  .b-warn{background:var(--warn)}
+  .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+  .chart-box{background:#fff;border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+  .chart-box h3{margin:2px 0 8px;font-size:14px}
+  .chart-box.full{grid-column:1 / -1}
+  .chart-wrap{position:relative;height:300px}
+  .chart-wrap.tall{height:420px}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:6px 8px;text-align:right;vertical-align:top}
+  th{background:#f1f5f9;text-align:right;position:sticky;top:0}
+  td.l,th.l{text-align:left}
+  tr.row-off{background:#fdf1f1} tr.row-def{background:#eef6fd} tr.row-warn{background:#fffbef}
+  tr.row-slaughter{background:#f3eefb}
+  .note{font-size:12px;color:#374151}
+  details summary{cursor:pointer;font-weight:600}
+  .field{display:flex;flex-direction:column;gap:4px;margin:8px 0}
+  .field label{font-size:13px;color:var(--muted)}
+  .field input,.field textarea,.field select{padding:7px 9px;border:1px solid var(--line);border-radius:7px;font-size:14px;font-family:inherit}
+  textarea{min-height:90px;resize:vertical}
+  .small{font-size:12px;color:var(--muted)}
+  .legend-inline span{display:inline-block;margin-right:14px;font-size:12px}
+  .legend-inline i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .parse-list{font-size:13px;margin:6px 0 0;padding-left:18px}
+  .parse-list li{margin:2px 0}
+  @media (max-width:820px){.chart-grid{grid-template-columns:1fr}}
+  @media print{
+    header.app{background:#0b3d57 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .toolbar,.tabs,.no-print{display:none !important}
+    .region-view{display:block !important;page-break-after:always}
+    body{background:#fff}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+</style>
+</head>
+<body>
+<header class="app">
+  <h1>Fôrprognose – regelbasert vurdering (Vest &amp; Midt)</h1>
+  <p>Lokalt verktøy for lakseoppdrett. Leser Excel-eksport av fôrprognose-cuben i nettleseren. Ingen installasjon, ingen server, fungerer offline.</p>
+</header>
+
+<main>
+  <div class="toolbar no-print">
+    <label><strong>Velg prognose-fil (.xlsx):</strong>
+      <input type="file" id="fileInput" accept=".xlsx,.xls">
+    </label>
+    <button id="printBtn" class="primary">🖨 Skriv ut / lagre som PDF</button>
+  </div>
+
+  <div id="messages"></div>
+
+  <div class="card no-print" id="settingsCard">
+    <details>
+      <summary>Innstillinger og forutsetninger</summary>
+      <div class="field" style="max-width:420px">
+        <label for="faktiskWeeks">Hvilke uker regnes som «faktisk» (siste faktiske)?</label>
+        <select id="faktiskWeeks">
+          <option value="auto" selected>Automatisk: to første rene juni-uker = faktisk, to neste = prognose (standard)</option>
+        </select>
+        <span class="small">Standard følger regelen: faktisk = snitt(w23,w24), prognose = snitt(w25,w26). Uke 27 (splittet) brukes aldri som hel uke i nøkkeltallet.</span>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="strictMode"> Vis tekniske parser-detaljer (kolonner funnet pr. ark)</label>
+      </div>
+    </details>
+  </div>
+
+  <div id="parseInfo" class="card hidden">
+    <h3 style="margin-top:0">Hva parseren fant</h3>
+    <div id="parseInfoBody"></div>
+  </div>
+
+  <div class="tabs no-print hidden" id="regionTabs"></div>
+  <div id="regionViews"></div>
+
+  <!-- Valgfrie slaktetall -->
+  <div class="card no-print hidden" id="slaughterCard">
+    <details>
+      <summary>Valgfritt: lim inn / last opp slaktetall (antall fisk)</summary>
+      <p class="small">Slaktetall ligger <em>ikke</em> i fôr-cuben (de kommer fra biologiplanen). Verktøyet utleder kun «fôr → 0 = slaktes ut». Du kan valgfritt lime inn slaktetall her for å berike slakte-seksjonen. Format pr. linje: <code>Lokalitet;uke;antall</code> eller <code>Lokalitet;antall</code>.</p>
+      <textarea id="slaughterPaste" placeholder="Eks:&#10;Beitveit (BSW);30;120000&#10;Rogne (BPI);95000"></textarea>
+      <div style="margin-top:8px"><button id="applySlaughter">Bruk slaktetall</button></div>
+    </details>
+  </div>
+
+  <!-- Valgfri AI-vurdering, AV som standard, klart adskilt -->
+  <div class="card no-print hidden" id="aiCard">
+    <details>
+      <summary>Valgfritt (av som standard): tekstlig AI-vurdering via API</summary>
+      <div class="msg warn" style="margin-top:10px">Dette er <strong>valgfritt</strong> og krever internett + egen API-nøkkel. Kjernen (parsing, beregninger, grafer, regelbaserte flagg) virker helt uten dette. Nøkkelen lagres kun lokalt i denne nettleseren (localStorage) og sendes kun til valgt endepunkt.</div>
+      <div class="field" style="max-width:560px">
+        <label for="aiEndpoint">API-endepunkt</label>
+        <input id="aiEndpoint" type="text" value="https://api.anthropic.com/v1/messages">
+      </div>
+      <div class="field" style="max-width:560px">
+        <label for="aiModel">Modell</label>
+        <input id="aiModel" type="text" value="claude-opus-4-8">
+      </div>
+      <div class="field" style="max-width:560px">
+        <label for="aiKey">API-nøkkel (lokal config)</label>
+        <input id="aiKey" type="password" placeholder="lagres kun i denne nettleseren">
+      </div>
+      <div style="margin:6px 0"><button id="aiRun">Generer tekstlig vurdering</button>
+        <button id="aiSaveKey">Lagre nøkkel lokalt</button></div>
+      <div id="aiOutput" class="note"></div>
+    </details>
+  </div>
+
+  <p class="small no-print" style="margin-top:30px">Regelbaserte flagg holder mennesket i løkka: verktøyet flagger og forklarer – du bestemmer. Terskel for status: Offensiv ≥ +8 %, Defensiv ≤ −8 %, ellers Realistisk.</p>
+</main>
+
+<!-- ====== EGEN LOGIKK (inline – fungerer ved dobbeltklikk, offline) ====== -->
+<script>
+/* === CORE_START === ren beregnings-/parselogikk (deles med test.js via uthenting) */
+"use strict";
+
+/* ---- terskler ---- */
+const OFFENSIV = 8, DEFENSIV = -8;
+const UNCERTAIN_SPREAD = 0.40;
+const SLAUGHTER_FRAC = 0.05;
+
+/* ---- formattering ---- */
+const fmt = (n, d = 0) => (n === null || n === undefined || isNaN(n))
+  ? "–" : n.toLocaleString("no-NO", { maximumFractionDigits: d, minimumFractionDigits: d });
+const fmtT = n => (n === null || n === undefined || isNaN(n)) ? "–" : fmt(n / 1000, 1) + " t";
+const fmtPct = n => (n === null || n === undefined || isNaN(n)) ? "–" : (n >= 0 ? "+" : "") + fmt(n, 1) + " %";
+
+function toNum(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return isNaN(v) ? null : v;
+  const s = String(v).replace(/\s/g, "").replace(",", ".");
+  if (s === "" || s === "-") return null;
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+const norm = s => String(s == null ? "" : s).trim();
+function siteKey(name) {
+  const m = norm(name).match(/\(([^)]+)\)\s*$/);
+  return m ? m[1].trim().toUpperCase() : norm(name).toUpperCase();
+}
+function avg(arr) {
+  const v = arr.filter(x => x !== null && x !== undefined && !isNaN(x));
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+
+/* ====================== 1) PARSER ====================== */
+function aoaFromSheet(ws) {
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, blankrows: true, defval: null });
+}
+function classifyRegion(sheetName) {
+  const s = sheetName.toLowerCase();
+  if (s.includes("west") || s.includes("vest")) return "Vest";
+  if (s.includes("midt")) return "Midt";
+  return null;
+}
+function findWeekHeader(aoa) {
+  for (let r = 0; r < Math.min(aoa.length, 15); r++) {
+    const row = aoa[r] || [];
+    if (norm(row[0]).toLowerCase() === "site name" &&
+        row.some(c => /\d{4}\s*w\s*\d{1,2}/i.test(norm(c)))) return r;
+  }
+  return -1;
+}
+
+function parseWeeklySheet(sheetName, aoa) {
+  const headerRow = findWeekHeader(aoa);
+  if (headerRow < 0) return null;
+  const region = classifyRegion(sheetName);
+  const header = aoa[headerRow] || [];
+  const mrow = aoa[headerRow - 1] || [];
+  const maxc = Math.max(header.length, mrow.length);
+
+  let detectedYear = null;
+  const weekCols = [], monthTotalCols = [];
+  for (let c = 1; c < maxc; c++) {
+    const mw = norm(header[c]).match(/(\d{4})\s*w\s*(\d{1,2})/i);
+    if (mw) {
+      const yr = parseInt(mw[1], 10);
+      detectedYear = detectedYear || yr;
+      weekCols.push({ col: c, week: parseInt(mw[2], 10), year: yr });
+      continue;
+    }
+    const mt = norm(mrow[c]).match(/(\d{4})\s*m\s*(\d{2}).*total/i);
+    if (mt) monthTotalCols.push({ col: c, month: parseInt(mt[2], 10), year: parseInt(mt[1], 10) });
+  }
+  if (!weekCols.length) return null;
+
+  const weekColMap = {};
+  weekCols.forEach(wc => { (weekColMap[wc.week] = weekColMap[wc.week] || []).push(wc.col); });
+  const allWeeks = Object.keys(weekColMap).map(Number).sort((a, b) => a - b);
+  const splitWeeks = new Set(allWeeks.filter(w => weekColMap[w].length > 1));
+
+  monthTotalCols.sort((a, b) => a.col - b.col);
+  const m06col = monthTotalCols[0] || null;
+  const m07col = monthTotalCols.length > 1 ? monthTotalCols[monthTotalCols.length - 1] : null;
+
+  const sites = [];
+  let grandTotalRow = null;
+  for (let r = headerRow + 1; r < aoa.length; r++) {
+    const row = aoa[r] || [];
+    const name = norm(row[0]);
+    if (!name) continue;
+    if (/^grand total/i.test(name)) { grandTotalRow = row; break; }
+    const weekly = {};
+    allWeeks.forEach(w => {
+      let sum = null;
+      weekColMap[w].forEach(col => {
+        const v = toNum(row[col]);
+        if (v !== null) sum = (sum === null ? 0 : sum) + v;
+      });
+      weekly[w] = sum;
+    });
+    sites.push({
+      name, key: siteKey(name), weekly,
+      m06: m06col ? toNum(row[m06col.col]) : null,
+      m07: m07col ? toNum(row[m07col.col]) : null
+    });
+  }
+
+  return {
+    sheetName, region, year: detectedYear, headerRow,
+    allWeeks, splitWeeks, weekColMap, monthTotalCols,
+    m06month: m06col && m06col.month, m07month: m07col && m07col.month,
+    sites, grandTotalRow
+  };
+}
+
+function parseSeasonal(aoa) {
+  let hr = -1, hc = -1;
+  for (let r = 0; r < aoa.length && hr < 0; r++) {
+    const row = aoa[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (/f[oô]r\s*\/\s*ib/i.test(norm(row[c]))) { hr = r; hc = c; break; }
+    }
+  }
+  if (hr < 0) return null;
+  const headerRow = aoa[hr];
+  const cols = [];
+  for (let c = hc + 1; c < headerRow.length; c++) {
+    const lab = norm(headerRow[c]);
+    if (/^20\d{2}$/.test(lab)) cols.push({ col: c, label: lab });
+    else if (/snitt/i.test(lab)) cols.push({ col: c, label: "snitt" });
+  }
+  const monthRows = {};
+  const monthRe = /^(jan|feb|mar|apr|mai|jun|jul|aug|sep|okt|nov|des)/i;
+  for (let r = hr + 1; r < aoa.length; r++) {
+    const m = norm((aoa[r] || [])[hc]).match(monthRe);
+    if (m) {
+      const vals = {};
+      cols.forEach(cd => { vals[cd.label] = toNum(aoa[r][cd.col]); });
+      monthRows[m[1].toLowerCase()] = vals;
+    }
+  }
+  if (!monthRows.jun || !monthRows.jul) return null;
+  const incByYear = {};
+  cols.forEach(cd => {
+    const j = monthRows.jun[cd.label], jl = monthRows.jul[cd.label];
+    incByYear[cd.label] = (j && j !== 0 && jl != null) ? (jl - j) / j * 100 : null;
+  });
+  return { cols: cols.map(c => c.label), jun: monthRows.jun, jul: monthRows.jul, incByYear };
+}
+
+function parseWorkbook(wb) {
+  const result = { weekly: [], seasonal: null, sheetsFound: wb.SheetNames.slice() };
+  wb.SheetNames.forEach(name => {
+    const aoa = aoaFromSheet(wb.Sheets[name]);
+    if (/mars-apr/i.test(name)) { const s = parseSeasonal(aoa); if (s) result.seasonal = s; return; }
+    const parsed = parseWeeklySheet(name, aoa);
+    if (parsed && parsed.region) result.weekly.push(parsed);
+  });
+  return result;
+}
+
+/* ====================== 2) BEREGNINGER ====================== */
+function pickAnalysisWeeks(sheet) {
+  const split = [...sheet.splitWeeks].sort((a, b) => a - b);
+  const splitW = split.length ? split[0] : Math.max(...sheet.allWeeks) + 1;
+  const preSingles = sheet.allWeeks.filter(w => w < splitW && !sheet.splitWeeks.has(w)).sort((a, b) => a - b);
+  return { faktisk: preSingles.slice(0, 2), prognose: preSingles.slice(2, 4), splitW, preSingles };
+}
+function statusFromPct(pct) {
+  if (pct === null || pct === undefined || isNaN(pct)) return "Ukjent";
+  if (pct >= OFFENSIV) return "Offensiv";
+  if (pct <= DEFENSIV) return "Defensiv";
+  return "Realistisk";
+}
+
+function computeRegion(sheet, sheet2024, seasonal) {
+  const aw = pickAnalysisWeeks(sheet);
+  const lastTwo = sheet.allWeeks.slice(-2);
+  const map2024 = {};
+  if (sheet2024) sheet2024.sites.forEach(s => { map2024[s.key] = s; });
+
+  const rows = sheet.sites.map(site => {
+    const fa = avg(aw.faktisk.map(w => site.weekly[w]));
+    const pr = avg(aw.prognose.map(w => site.weekly[w]));
+    const endring = (fa && fa !== 0 && pr !== null) ? (pr - fa) / fa * 100 : null;
+    const f1 = site.weekly[aw.faktisk[0]], f2 = site.weekly[aw.faktisk[1]];
+    let uncertain = false, spread = null;
+    if (f1 !== null && f2 !== null && Math.max(f1, f2) > 0) {
+      spread = Math.abs(f1 - f2) / Math.max(f1, f2);
+      uncertain = spread > UNCERTAIN_SPREAD;
+    }
+    const lastAvg = avg(lastTwo.map(w => site.weekly[w] === null ? 0 : site.weekly[w]));
+    const slaughter = !!(fa && fa > 0 && lastAvg !== null && lastAvg < SLAUGHTER_FRAC * fa);
+    const incCur = (site.m06 && site.m06 !== 0 && site.m07 != null) ? (site.m07 - site.m06) / site.m06 * 100 : null;
+    const s24 = map2024[site.key];
+    const inc24 = (s24 && s24.m06 && s24.m06 !== 0 && s24.m07 != null) ? (s24.m07 - s24.m06) / s24.m06 * 100 : null;
+    return {
+      name: site.name, key: site.key, fa, pr, endring, status: statusFromPct(endring),
+      uncertain, spread, slaughter, f1, f2, lastAvg, m06: site.m06, m07: site.m07,
+      incCur, inc24, has2024: !!s24, weekly: site.weekly
+    };
+  });
+
+  const weekTotals = {};
+  sheet.allWeeks.forEach(w => { weekTotals[w] = sheet.sites.reduce((a, s) => a + (s.weekly[w] || 0), 0); });
+  const regFa = avg(aw.faktisk.map(w => weekTotals[w]));
+  const regPr = avg(aw.prognose.map(w => weekTotals[w]));
+  const regEndring = (regFa && regFa !== 0) ? (regPr - regFa) / regFa * 100 : null;
+  const regM06 = sheet.sites.reduce((a, s) => a + (s.m06 || 0), 0);
+  const regM07 = sheet.sites.reduce((a, s) => a + (s.m07 || 0), 0);
+  const regInc = regM06 ? (regM07 - regM06) / regM06 * 100 : null;
+  let reg24Inc = null, reg24M06 = null, reg24M07 = null;
+  if (sheet2024) {
+    reg24M06 = sheet2024.sites.reduce((a, s) => a + (s.m06 || 0), 0);
+    reg24M07 = sheet2024.sites.reduce((a, s) => a + (s.m07 || 0), 0);
+    reg24Inc = reg24M06 ? (reg24M07 - reg24M06) / reg24M06 * 100 : null;
+  }
+  const seasonalInc = seasonal ? seasonal.incByYear["snitt"] : null;
+
+  return {
+    region: sheet.region, year: sheet.year, aw, lastTwo, rows, weekTotals,
+    regFa, regPr, regEndring, regStatus: statusFromPct(regEndring),
+    regM06, regM07, regInc, reg24Inc, reg24M06, reg24M07, seasonalInc, has2024: !!sheet2024
+  };
+}
+
+function buildReason(r, comp) {
+  const parts = [];
+  if (r.slaughter) {
+    return `Fôr faller mot 0 i uke ${comp.lastTwo.join("/")} – tolkes som <strong>utslakting</strong> (forventet fall, ikke prognosefeil). Verifiser mot biologi-/slakteplan.`;
+  }
+  if (r.uncertain) {
+    parts.push(`⚠ <strong>Usikkert grunnlag:</strong> stor sprik mellom de to faktiske ukene (${fmtT(r.f1)} vs ${fmtT(r.f2)}, ${fmt(r.spread * 100, 0)} % avvik) – forholdstallet er ustabilt, demp konklusjonen.`);
+  }
+  if (r.endring === null) parts.push("Ikke nok faktiske data til å beregne endring.");
+  else if (r.status === "Offensiv") parts.push(`Prognosen øker ${fmtPct(r.endring)} mot faktisk forbruk. Vurder om økningen er biologisk realistisk.`);
+  else if (r.status === "Defensiv") parts.push(`Prognosen kutter ${fmtPct(r.endring)} mot faktisk. Sjekk at kuttet er reelt (slakt/sykdom) og ikke for forsiktig.`);
+  else parts.push(`Innenfor ±8 % (${fmtPct(r.endring)}) – samsvarer godt med faktisk forbruk.`);
+
+  if (r.has2024 && r.incCur !== null && r.inc24 !== null) {
+    parts.push(`Juni→juli: prognose ${fmtPct(r.incCur)} mot 2024 ${fmtPct(r.inc24)}.`);
+    if (r.status === "Defensiv" && comp.seasonalInc !== null && r.incCur < comp.seasonalInc - 5) {
+      parts.push(`Merk: 2024 kan være et svakt referanseår – historisk normal juni→juli (fôr/ib-snitt) er ${fmtPct(comp.seasonalInc)}. Ikke kutt blindt mot ett svakt år.`);
+    }
+  } else if (r.incCur !== null) parts.push(`Juni→juli inneværende: ${fmtPct(r.incCur)}.`);
+  return parts.join(" ");
+}
+
+/* eksport for Node-test (ignoreres i nettleser fordi 'module' er undefined) */
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    OFFENSIV, DEFENSIV, UNCERTAIN_SPREAD, SLAUGHTER_FRAC,
+    fmt, fmtT, fmtPct, toNum, norm, siteKey, avg,
+    aoaFromSheet, classifyRegion, findWeekHeader, parseWeeklySheet, parseSeasonal, parseWorkbook,
+    pickAnalysisWeeks, statusFromPct, computeRegion, buildReason
+  };
+}
+/* === CORE_END === */
+</script>
+
+<script>
+/* === APP: DOM, grafer og app-flyt (kjører kun i nettleser) === */
+const messages = document.getElementById("messages");
+function showMsg(html, type = "err") {
+  const d = document.createElement("div");
+  d.className = "msg " + type;
+  d.innerHTML = html;
+  messages.appendChild(d);
+}
+function clearMsgs() { messages.innerHTML = ""; }
+
+const COL = { off: "#d64545", real: "#2f9e44", def: "#1c7ed6", warn: "#b7791f", line: "#0b6e99" };
+const statusClass = s => ({ Offensiv: "b-off", Realistisk: "b-real", Defensiv: "b-def" }[s] || "b-warn");
+const rowClass = r => r.slaughter ? "row-slaughter" : r.uncertain ? "row-warn"
+  : r.status === "Offensiv" ? "row-off" : r.status === "Defensiv" ? "row-def" : "";
+
+let charts = [];
+function destroyCharts() { charts.forEach(c => c.destroy()); charts = []; }
+let lastComputed = [], lastParsed = null;
+
+function renderParseInfo(parsed) {
+  const box = document.getElementById("parseInfo");
+  const body = document.getElementById("parseInfoBody");
+  const strict = document.getElementById("strictMode").checked;
+  box.classList.remove("hidden");
+  let html = `<p class="small">Ark i filen: ${parsed.sheetsFound.map(s => `<code>${s}</code>`).join(", ")}</p><ul class='parse-list'>`;
+  parsed.weekly.forEach(s => {
+    const aw = pickAnalysisWeeks(s);
+    html += `<li><strong>${s.region}${s.year === 2024 ? " 2024 (historikk)" : ""}</strong> (ark «${s.sheetName}»): `
+      + `${s.sites.length} lokaliteter, uker ${s.allWeeks.map(w => "w" + w).join(", ")}. `
+      + (s.splitWeeks.size ? `Splittet uke: ${[...s.splitWeeks].map(w => "w" + w).join(", ")} (summert til hel uke). ` : "Ingen splittet uke. ")
+      + (s.year !== 2024 ? `Faktisk=w${aw.faktisk.join(", w")}; prognose=w${aw.prognose.join(", w")}.` : "");
+    if (strict) {
+      html += `<br><span class="small">Kolonner: ` + Object.entries(s.weekColMap)
+        .map(([w, cols]) => `w${w}→[${cols.join(",")}]`).join("  ")
+        + `; månedstotaler→[${s.monthTotalCols.map(m => m.col).join(",")}]</span>`;
+    }
+    html += "</li>";
+  });
+  html += "</ul>";
+  if (parsed.seasonal) {
+    html += `<p class="small">Sesong (mars-apr / fôr-ib PO6): år funnet ${parsed.seasonal.cols.join(", ")}. `
+      + `Juni→juli-snitt (flerår): ${fmtPct(parsed.seasonal.incByYear["snitt"])}.</p>`;
+  } else html += `<p class="small">Ingen «mars-apr» sesongtabell funnet (valgfri).</p>`;
+  body.innerHTML = html;
+}
+
+function kpiCard(lab, val, sub) {
+  return `<div class="kpi"><div class="lab">${lab}</div><div class="val">${val}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+}
+
+function renderRegion(comp, container) {
+  const id = comp.region.toLowerCase();
+  const sec = document.createElement("section");
+  sec.className = "region-view card";
+  sec.dataset.region = comp.region;
+
+  const statBadge = `<span class="badge ${statusClass(comp.regStatus)}">${comp.regStatus}</span>`;
+  let kpis = `<div class="kpis">`;
+  kpis += kpiCard("Faktisk snitt/uke", fmtT(comp.regFa), `w${comp.aw.faktisk.join(", w")}`);
+  kpis += kpiCard("Prognosesnitt/uke", fmtT(comp.regPr), `w${comp.aw.prognose.join(", w")}`);
+  kpis += kpiCard("Endring faktisk→prognose", fmtPct(comp.regEndring), "region totalt");
+  kpis += kpiCard("Status region", statBadge, "");
+  kpis += kpiCard("Juni→juli (prognose)", fmtPct(comp.regInc), `${fmtT(comp.regM06)} → ${fmtT(comp.regM07)}`);
+  if (comp.has2024) kpis += kpiCard("Juni→juli 2024", fmtPct(comp.reg24Inc), "faktisk fjorår");
+  if (comp.seasonalInc !== null) kpis += kpiCard("Hist. normal (fôr/ib snitt)", fmtPct(comp.seasonalInc), "flerår 2020–2027");
+  kpis += `</div>`;
+
+  const charthtml = `
+    <div class="chart-grid">
+      <div class="chart-box full">
+        <h3>Totalt fôr pr. uke – ${comp.region} (faktisk heltrukket, prognose stiplet)</h3>
+        <div class="chart-wrap"><canvas id="cw_${id}"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <h3>Avvik pr. lokalitet (sortert)</h3>
+        <div class="legend-inline"><span><i style="background:${COL.off}"></i>Offensiv</span><span><i style="background:${COL.real}"></i>Realistisk</span><span><i style="background:${COL.def}"></i>Defensiv</span></div>
+        <div class="chart-wrap tall"><canvas id="cd_${id}"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <h3>Juni→juli-økning: ${comp.has2024 ? "2024 vs " : ""}prognose</h3>
+        <div class="chart-wrap"><canvas id="cj_${id}"></canvas></div>
+      </div>
+    </div>`;
+
+  const sorted = comp.rows.slice().sort((a, b) => {
+    if (a.slaughter !== b.slaughter) return a.slaughter ? 1 : -1;
+    return (b.endring == null ? -1e9 : b.endring) - (a.endring == null ? -1e9 : a.endring);
+  });
+  let tbl = `<h3>Regelbaserte justeringsforslag – ${comp.region}</h3>
+    <div style="overflow:auto;max-height:560px"><table><thead><tr>
+      <th class="l">Lokalitet</th><th>Faktisk snitt</th><th>Prognose snitt</th><th>Endring</th>
+      <th>Status</th><th>Juni→juli (prog)</th>${comp.has2024 ? "<th>Juni→juli 2024</th>" : ""}
+      <th class="l">Begrunnelse / forslag</th></tr></thead><tbody>`;
+  sorted.forEach(r => {
+    const badge = r.slaughter ? `<span class="badge b-warn">Slaktes ut</span>`
+      : `<span class="badge ${statusClass(r.status)}">${r.status}</span>`;
+    tbl += `<tr class="${rowClass(r)}">
+      <td class="l">${r.name}</td>
+      <td>${fmtT(r.fa)}</td><td>${fmtT(r.pr)}</td><td>${fmtPct(r.endring)}</td>
+      <td>${badge}${r.uncertain && !r.slaughter ? ' <span class="badge b-warn">Usikkert</span>' : ""}</td>
+      <td>${fmtPct(r.incCur)}</td>${comp.has2024 ? `<td>${fmtPct(r.inc24)}</td>` : ""}
+      <td class="l note">${buildReason(r, comp)}</td></tr>`;
+  });
+  tbl += `</tbody></table></div>`;
+
+  const slaughter = comp.rows.filter(r => r.slaughter);
+  let slaughterHtml = `<h3>Slaktelokaliteter (fôr → 0) – påvirker utfôring</h3>`;
+  if (!slaughter.length) {
+    slaughterHtml += `<p class="small">Ingen lokaliteter med fôr mot 0 i siste prognoseuker.</p>`;
+  } else {
+    slaughterHtml += `<p class="small">Fôr går mot 0 i uke ${comp.lastTwo.join("/")} – forventet fall pga. slakt, ikke prognosefeil. Slaktetall (antall fisk) ligger ikke i fôr-cuben; lim eventuelt inn via panelet over.</p>`;
+    slaughterHtml += `<table><thead><tr><th class="l">Lokalitet</th><th>Faktisk snitt</th><th>Siste uker snitt</th><th class="l">Slaktetall (valgfritt)</th></tr></thead><tbody>`;
+    slaughter.forEach(r => {
+      slaughterHtml += `<tr class="row-slaughter"><td class="l">${r.name}</td><td>${fmtT(r.fa)}</td><td>${fmtT(r.lastAvg)}</td><td class="l" data-slaughter-key="${r.key}">–</td></tr>`;
+    });
+    slaughterHtml += `</tbody></table>`;
+  }
+
+  sec.innerHTML = `<h2 class="region">${comp.region}${comp.year ? " – " + comp.year : ""}</h2>` + kpis + charthtml + tbl + slaughterHtml;
+  container.appendChild(sec);
+
+  buildWeekChart(comp, `cw_${id}`);
+  buildDeviationChart(comp, `cd_${id}`);
+  buildJuneJulyChart(comp, `cj_${id}`);
+  return sec;
+}
+
+function buildWeekChart(comp, canvasId) {
+  const weeks = Object.keys(comp.weekTotals).map(Number).sort((a, b) => a - b);
+  const lastFaktisk = comp.aw.faktisk[comp.aw.faktisk.length - 1];
+  const labels = weeks.map(w => "u" + w);
+  const data = weeks.map(w => comp.weekTotals[w] / 1000);
+  charts.push(new Chart(document.getElementById(canvasId), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Fôr (tonn)", data, borderColor: COL.line, backgroundColor: "rgba(11,110,153,.08)",
+        pointRadius: 4, pointBackgroundColor: weeks.map(w => w <= lastFaktisk ? COL.line : "#fff"),
+        pointBorderColor: COL.line, fill: true, tension: .2,
+        segment: { borderDash: c => (weeks[c.p1DataIndex] > lastFaktisk ? [6, 5] : undefined) }
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => fmt(c.parsed.y, 1) + " tonn" } },
+        title: { display: true, text: `Faktisk t.o.m. u${lastFaktisk}, prognose stiplet`, font: { size: 11 }, color: "#6b7280" }
+      },
+      scales: { y: { title: { display: true, text: "tonn" }, beginAtZero: true } }
+    }
+  }));
+}
+
+function buildDeviationChart(comp, canvasId) {
+  const rows = comp.rows.filter(r => r.endring !== null && !r.slaughter).slice().sort((a, b) => b.endring - a.endring);
+  charts.push(new Chart(document.getElementById(canvasId), {
+    type: "bar",
+    data: {
+      labels: rows.map(r => r.name.replace(/\s*\([^)]*\)\s*$/, "")),
+      datasets: [{
+        label: "Endring %", data: rows.map(r => r.endring),
+        backgroundColor: rows.map(r => r.status === "Offensiv" ? COL.off : r.status === "Defensiv" ? COL.def : COL.real)
+      }]
+    },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmtPct(c.parsed.x) } } },
+      scales: { x: { title: { display: true, text: "endring %" } }, y: { ticks: { font: { size: 10 } } } }
+    }
+  }));
+}
+
+function buildJuneJulyChart(comp, canvasId) {
+  const labels = [], data = [], colors = [];
+  if (comp.has2024) { labels.push("2024 (faktisk)"); data.push(comp.reg24Inc); colors.push("#94a3b8"); }
+  labels.push("Prognose " + (comp.year || "")); data.push(comp.regInc); colors.push(COL.line);
+  if (comp.seasonalInc !== null) { labels.push("Hist. snitt fôr/ib"); data.push(comp.seasonalInc); colors.push(COL.warn); }
+  charts.push(new Chart(document.getElementById(canvasId), {
+    type: "bar",
+    data: { labels, datasets: [{ label: "Juni→juli %", data, backgroundColor: colors }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmtPct(c.parsed.y) } } },
+      scales: { y: { title: { display: true, text: "økning %" }, beginAtZero: true } }
+    }
+  }));
+}
+
+function runAnalysis(parsed) {
+  destroyCharts();
+  const views = document.getElementById("regionViews");
+  const tabs = document.getElementById("regionTabs");
+  views.innerHTML = ""; tabs.innerHTML = ""; lastComputed = [];
+
+  const current = parsed.weekly.filter(s => s.year !== 2024);
+  const hist2024 = parsed.weekly.filter(s => s.year === 2024);
+  const find2024 = region => hist2024.find(s => s.region === region) || null;
+  if (!current.length) { showMsg("Fant ingen inneværende uke-ark (west uke / midt uke) med gyldig header.", "err"); return; }
+
+  const order = ["Vest", "Midt"];
+  const sheets = current.slice().sort((a, b) => order.indexOf(a.region) - order.indexOf(b.region));
+  sheets.forEach((sheet, i) => {
+    const comp = computeRegion(sheet, find2024(sheet.region), parsed.seasonal);
+    lastComputed.push(comp);
+    const sec = renderRegion(comp, views);
+    const btn = document.createElement("button");
+    btn.textContent = comp.region;
+    btn.className = i === 0 ? "active" : "";
+    btn.onclick = () => {
+      [...views.children].forEach(v => v.style.display = "none");
+      [...tabs.children].forEach(t => t.classList.remove("active"));
+      sec.style.display = ""; btn.classList.add("active");
+    };
+    tabs.appendChild(btn);
+    if (i !== 0) sec.style.display = "none";
+  });
+  tabs.classList.remove("hidden");
+  document.getElementById("slaughterCard").classList.remove("hidden");
+  document.getElementById("aiCard").classList.remove("hidden");
+
+  const sum = lastComputed.map(c => `${c.region}: ${c.regStatus} (${fmtPct(c.regEndring)})`).join(" · ");
+  showMsg(`Analyse fullført. ${sum}. Gå gjennom de regelbaserte flaggene – verktøyet flagger, du bestemmer.`, "ok");
+}
+
+document.getElementById("fileInput").addEventListener("change", function (e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  clearMsgs();
+  const reader = new FileReader();
+  reader.onload = function (ev) {
+    try {
+      const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+      const parsed = parseWorkbook(wb);
+      lastParsed = parsed;
+      if (!parsed.weekly.length) {
+        showMsg("Fant ingen gyldige uke-ark. Forventer ark som «west uke» / «midt uke» med en 'Site name'-rad og ukelabler (f.eks. 2026w23).", "err");
+        return;
+      }
+      renderParseInfo(parsed);
+      runAnalysis(parsed);
+    } catch (err) {
+      showMsg("Klarte ikke å lese filen: " + (err && err.message ? err.message : err), "err");
+      console.error(err);
+    }
+  };
+  reader.onerror = () => showMsg("Feil ved lesing av fil.", "err");
+  reader.readAsArrayBuffer(file);
+});
+
+document.getElementById("strictMode").addEventListener("change", () => { if (lastParsed) renderParseInfo(lastParsed); });
+document.getElementById("printBtn").addEventListener("click", () => {
+  [...document.getElementById("regionViews").children].forEach(v => v.style.display = "");
+  window.print();
+});
+
+document.getElementById("applySlaughter").addEventListener("click", () => {
+  const map = {};
+  document.getElementById("slaughterPaste").value.split(/\r?\n/).forEach(line => {
+    const p = line.split(/[;\t,]/).map(s => s.trim()).filter(Boolean);
+    if (p.length >= 2) {
+      const num = toNum(p[p.length - 1]);
+      if (num !== null) { const k = siteKey(p[0]); map[k] = (map[k] || 0) + num; }
+    }
+  });
+  let n = 0;
+  document.querySelectorAll("[data-slaughter-key]").forEach(td => {
+    const k = td.getAttribute("data-slaughter-key");
+    if (map[k] != null) { td.textContent = fmt(map[k]) + " fisk"; n++; }
+  });
+  showMsg(n ? `Slaktetall lagt til for ${n} lokalitet(er).` : "Fant ingen matchende lokaliteter i innlimte slaktetall.", n ? "ok" : "warn");
+});
+
+document.getElementById("aiSaveKey").addEventListener("click", () => {
+  try {
+    localStorage.setItem("forprognose_ai_key", document.getElementById("aiKey").value);
+    localStorage.setItem("forprognose_ai_model", document.getElementById("aiModel").value);
+    localStorage.setItem("forprognose_ai_endpoint", document.getElementById("aiEndpoint").value);
+    showMsg("Nøkkel/konfig lagret lokalt i denne nettleseren.", "ok");
+  } catch (e) { showMsg("Klarte ikke lagre lokalt.", "warn"); }
+});
+(function loadAiCfg() {
+  try {
+    const k = localStorage.getItem("forprognose_ai_key"); if (k) document.getElementById("aiKey").value = k;
+    const m = localStorage.getItem("forprognose_ai_model"); if (m) document.getElementById("aiModel").value = m;
+    const e = localStorage.getItem("forprognose_ai_endpoint"); if (e) document.getElementById("aiEndpoint").value = e;
+  } catch (e) {}
+})();
+
+function buildAiSummary() {
+  return lastComputed.map(c => {
+    const top = c.rows.filter(r => !r.slaughter && r.endring !== null)
+      .sort((a, b) => Math.abs(b.endring) - Math.abs(a.endring)).slice(0, 8)
+      .map(r => `  - ${r.name}: ${fmtPct(r.endring)} (${r.status}${r.uncertain ? ", usikkert grunnlag" : ""})`).join("\n");
+    const sl = c.rows.filter(r => r.slaughter).map(r => r.name).join(", ") || "ingen";
+    return `Region ${c.region} (${c.year}):
+  Faktisk snitt/uke: ${fmtT(c.regFa)}, prognosesnitt/uke: ${fmtT(c.regPr)}, endring ${fmtPct(c.regEndring)} -> ${c.regStatus}
+  Juni->juli prognose ${fmtPct(c.regInc)}${c.has2024 ? `, 2024 ${fmtPct(c.reg24Inc)}` : ""}${c.seasonalInc !== null ? `, hist. fôr/ib-snitt ${fmtPct(c.seasonalInc)}` : ""}
+  Største avvik:\n${top}
+  Slaktes ut: ${sl}`;
+  }).join("\n\n");
+}
+
+document.getElementById("aiRun").addEventListener("click", async () => {
+  const out = document.getElementById("aiOutput");
+  const key = document.getElementById("aiKey").value.trim();
+  const model = document.getElementById("aiModel").value.trim();
+  const endpoint = document.getElementById("aiEndpoint").value.trim();
+  if (!lastComputed.length) { out.textContent = "Last inn en fil og kjør analyse først."; return; }
+  if (!key) { out.textContent = "Mangler API-nøkkel (valgfritt felt)."; return; }
+  out.textContent = "Genererer vurdering …";
+  const prompt = `Du er fôrplanlegger i lakseoppdrett. Gi en kort, nøktern norsk vurdering (maks 200 ord) av om fôrprognosen virker fornuftig, basert på disse deterministiske nøkkeltallene. Vær konkret om hvilke lokaliteter som bør sjekkes. Ikke foreslå å kutte mot ett svakt år.\n\n${buildAiSummary()}`;
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model, max_tokens: 700, messages: [{ role: "user", content: prompt }] })
+    });
+    const j = await res.json();
+    if (!res.ok) { out.textContent = "API-feil: " + (j.error ? j.error.message : res.status); return; }
+    const text = j.content ? j.content.map(b => b.text || "").join("") : JSON.stringify(j);
+    out.innerHTML = "<strong>AI-vurdering (valgfri, ikke autopilot):</strong><br>" + text.replace(/\n/g, "<br>");
+  } catch (err) {
+    out.textContent = "Klarte ikke kontakte API (krever internett): " + err.message;
+  }
+});
+</script>
+</body>
+</html>
